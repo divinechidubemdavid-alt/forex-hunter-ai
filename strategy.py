@@ -161,6 +161,18 @@ def format_signal(symbol, result):
     status = result["status"]
     timeframe = result["timeframe"]
 
+    if symbol == "BTC/USD":
+        digits = 2
+    elif symbol == "XAU/USD":
+        digits = 2
+    elif "JPY" in symbol:
+        digits = 3
+    else:
+        digits = 5
+
+    def price(value):
+        return f"{float(value):.{digits}f}"
+
     if status == "WAIT":
         return (
             f"Forex Hunter AI — {symbol} ({timeframe})\n"
@@ -175,11 +187,11 @@ def format_signal(symbol, result):
         f"Forex Hunter AI — CONFIRMED {status}\n"
         f"Market: {symbol}\n"
         f"Entry timeframe: {timeframe}\n"
-        f"Closed-candle entry: {result['entry']:.5f}\n"
-        f"Stop loss: {result['stop_loss']:.5f}\n"
-        f"TP1: {targets[0]:.5f}\n"
-        f"TP2: {targets[1]:.5f}\n"
-        f"TP3: {targets[2]:.5f}\n"
+        f"Closed-candle entry: {price(result['entry'])}\n"
+        f"Stop loss: {price(result['stop_loss'])}\n"
+        f"TP1: {price(targets[0])}\n"
+        f"TP2: {price(targets[1])}\n"
+        f"TP3: {price(targets[2])}\n"
         f"ADX: {result['adx']:.1f}\n\n"
         "Manual analysis only. No orders are placed. "
         "Confirm spread, news, and risk before considering any trade."

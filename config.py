@@ -11,10 +11,10 @@ TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
 
 # Markets the user can select for an individual scan.
 MARKETS = {
-    "EUR/USD": "EUR/USD",
     "GBP/USD": "GBP/USD",
     "USD/JPY": "USD/JPY",
     "XAU/USD": "XAU/USD",
+    "BTC/USD": "BTC/USD",
 }
 
 # Supported analysis timeframes.

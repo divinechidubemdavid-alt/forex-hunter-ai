@@ -32,6 +32,7 @@ from config import (
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
+from auto_scanner import auto_scan_loop
 
 
 logging.basicConfig(
@@ -267,7 +268,7 @@ def _price(value, symbol):
 def normalise_symbol(value):
     symbol = value.strip().upper().replace(" ", "")
     aliases = {
-        "EURUSD": "EUR/USD",
+        "BTCUSD": "BTC/USD",
         "GBPUSD": "GBP/USD",
         "USDJPY": "USD/JPY",
         "XAUUSD": "XAU/USD",
@@ -302,7 +303,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = (
         f"Welcome to {BOT_NAME}!\n\n"
         "Forex trend analysis using EMA 9/21 and ADX.\n\n"
-        "Supported markets: EUR/USD, GBP/USD, USD/JPY and XAU/USD (Gold).\n\n"
+        "Supported markets: GBP/USD, USD/JPY, XAU/USD (Gold) and BTC/USD (Bitcoin).\n\n"
         "Choose a button below to begin.\n\n"
         "⚠️ ANALYSIS ONLY: this bot never places orders. Signals are not "
         "guaranteed profits. Always verify prices with your broker."
@@ -396,7 +397,7 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = normalise_symbol(context.args[0])
     if symbol not in _market_names():
         await update.effective_message.reply_text(
-            "Supported markets: EUR/USD, GBP/USD, USD/JPY and XAU/USD.\nExample: /scan EUR/USD"
+            "Supported markets: GBP/USD, USD/JPY, XAU/USD and BTC/USD.\nExample: /scan BTC/USD"
         )
         return
     await do_analysis(update.effective_chat.id, user_id, symbol, _get_timeframe(user_id), context)
@@ -411,7 +412,7 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = normalise_symbol("".join(context.args))
     if symbol not in _market_names():
         await update.effective_message.reply_text(
-            "Supported markets: EUR/USD, GBP/USD, USD/JPY and XAU/USD.\nExample: /analyze EUR/USD"
+            "Supported markets: GBP/USD, USD/JPY, XAU/USD and BTC/USD.\nExample: /analyze BTC/USD"
         )
         return
     await do_analysis(update.effective_chat.id, user_id, symbol, _get_timeframe(user_id), context)
@@ -903,16 +904,18 @@ async def post_init(app: Application):
     ]
     await app.bot.set_my_commands(commands)
     app.bot_data["monitor_task"] = asyncio.create_task(active_trade_loop(app))
+    app.bot_data["auto_scan_task"] = asyncio.create_task(auto_scan_loop(app))
 
 
 async def post_shutdown(app: Application):
-    task = app.bot_data.get("monitor_task")
-    if task:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    for task_name in ("monitor_task", "auto_scan_task"):
+        task = app.bot_data.get(task_name)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 def main():
