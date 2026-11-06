@@ -178,6 +178,18 @@ async def show_market_scanner(update, context):
 async def show_strong_signals(update, context):
     user_id = _user_id(update)
     opportunities = state.get_opportunities(limit=100)
+    # Backward compatibility: also hide opportunities tracked before the
+    # claimed_by field existed, by matching their original signal fingerprint.
+    tracked_fingerprints = set()
+    for tracked in state.get_signal_history(user_id, limit=500):
+        tracked_fingerprints.add((
+            str(tracked.get("symbol")),
+            str(tracked.get("direction")),
+            str(tracked.get("timeframe", "15m")),
+            str(tracked.get("entry")),
+            str(tracked.get("candle_time")),
+        ))
+
     now = datetime.now(WAT)
     strong = []
     for item in opportunities:
@@ -185,6 +197,15 @@ async def show_strong_signals(update, context):
         if not isinstance(claimed_by, list):
             claimed_by = []
         if str(user_id) in {str(value) for value in claimed_by}:
+            continue
+        fingerprint = (
+            str(item.get("symbol")),
+            str(item.get("direction")),
+            str(item.get("timeframe", "15m")),
+            str(item.get("entry")),
+            str(item.get("candle_time")),
+        )
+        if fingerprint in tracked_fingerprints:
             continue
         created = item.get("created_at")
         try:
