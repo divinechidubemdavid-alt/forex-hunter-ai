@@ -382,8 +382,8 @@ async def show_settings(update, context):
         f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\n\n"
         "API safety counter:\n"
         f"{usage['used']} / {usage['limit']} requests recorded today\n"
-        f"Remaining local allowance: {usage['remaining']}\n\n"
-        "The API counter is a local safety measure, not a live "
+        f"Remaining local request allowance: {usage['remaining']}\n\n"
+        "The API counter counts local requests; it is not a live "
         "Twelve Data credit statement."
     )
 
