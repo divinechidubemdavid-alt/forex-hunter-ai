@@ -1,5 +1,4 @@
 
-
 import asyncio
 import time
 
@@ -18,32 +17,144 @@ API_URL = "https://api.twelvedata.com/time_series"
 _cache = {}
 _cache_lock = asyncio.Lock()
 
+SUPPORTED_INTERVALS = {
+    "1m": "1min",
+    "5m": "5min",
+    "15m": "15min",
+    "30m": "30min",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1day",
+    "1day": "1day",
+}
+
 
 class MarketDataError(Exception):
-    pass
+    """Raised when market data cannot safely be used."""
 
 
-async def fetch_candles(symbol, outputsize=1500):
-    """Fetch completed one-minute candles for one selected market."""
-    if not TWELVE_DATA_API_KEY:
-        raise MarketDataError(
-            "Twelve Data API key is missing. Add it to Codespaces Secrets."
+def _normalise_timeframe(timeframe):
+    value = str(timeframe).strip().lower()
+
+    if value not in SUPPORTED_INTERVALS:
+        raise ValueError(
+            "Unsupported timeframe. Use 1m, 5m, 15m, 30m, "
+            "1h, 4h, or 1day."
         )
 
+    return value
+
+
+def _process_candles(values, timeframe):
+    required = ["datetime", "open", "high", "low", "close"]
+
+    frame = pd.DataFrame(values)
+
+    if frame.empty or any(column not in frame.columns for column in required):
+        raise ValueError("Required candle data is missing.")
+
+    frame = frame[required].copy()
+
+    frame["datetime"] = pd.to_datetime(
+        frame["datetime"],
+        utc=True,
+        errors="coerce",
+    )
+
+    for column in ["open", "high", "low", "close"]:
+        frame[column] = pd.to_numeric(
+            frame[column],
+            errors="coerce",
+        )
+
+    frame = frame.dropna()
+    frame = frame.sort_values("datetime")
+    frame = frame.drop_duplicates("datetime")
+    frame = frame.set_index("datetime")
+    frame = frame[~frame.index.duplicated(keep="last")]
+
+    # Remove the currently forming candle.
+    now = pd.Timestamp.now(tz="UTC")
+
+    interval = SUPPORTED_INTERVALS[timeframe]
+    duration = pd.Timedelta(interval)
+
+    frame = frame[
+        frame.index + duration <= now
+    ]
+
+    if len(frame) < 60:
+        raise ValueError(
+            f"Not enough completed candles. Received {len(frame)}."
+        )
+
+    latest_age = (
+        now - (frame.index[-1] + duration)
+    ).total_seconds() / 60
+
+    # Allow a little extra time for provider publication delays.
+    if latest_age > MAX_CANDLE_AGE_MINUTES:
+        raise ValueError(
+            f"Market data is stale ({latest_age:.1f} minutes old)."
+        )
+
+    return frame
+
+
+async def fetch_candles(
+    symbol,
+    outputsize=1500,
+    interval="1min",
+):
+    """
+    Fetch completed candles from Twelve Data.
+
+    interval may be:
+    1min, 5min, 15min, 30min, 1h, 4h, or 1day.
+
+    The shared state module controls daily API request allowance.
+    """
+
+    if not TWELVE_DATA_API_KEY:
+        raise MarketDataError(
+            "Twelve Data API key is missing. "
+            "Add it to Codespaces Secrets."
+        )
+
+    timeframe = _normalise_timeframe(interval)
+    provider_interval = SUPPORTED_INTERVALS[timeframe]
+
+    symbol = str(symbol).strip().upper()
+
+    if not symbol:
+        raise MarketDataError("A market symbol is required.")
+
+    try:
+        outputsize = int(outputsize)
+    except (TypeError, ValueError):
+        outputsize = 1500
+
+    outputsize = max(60, min(outputsize, 5000))
+
+    cache_key = (symbol, provider_interval, outputsize)
     now = time.time()
 
     async with _cache_lock:
-        cached = _cache.get(symbol)
+        cached = _cache.get(cache_key)
+
         if cached and now - cached["time"] < CACHE_TTL_SECONDS:
             return cached["data"].copy()
 
-    allowed, reason = await asyncio.to_thread(state.reserve_api_request)
+    allowed, reason = await asyncio.to_thread(
+        state.reserve_api_request
+    )
+
     if not allowed:
         raise MarketDataError(reason)
 
     params = {
         "symbol": symbol,
-        "interval": "1min",
+        "interval": provider_interval,
         "outputsize": outputsize,
         "apikey": TWELVE_DATA_API_KEY,
         "format": "JSON",
@@ -55,13 +166,16 @@ async def fetch_candles(symbol, outputsize=1500):
             response = await client.get(API_URL, params=params)
             response.raise_for_status()
             payload = response.json()
+
     except (httpx.HTTPError, ValueError) as exc:
         raise MarketDataError(
             f"Twelve Data request failed: {exc}"
         ) from exc
 
     if not isinstance(payload, dict):
-        raise MarketDataError("Twelve Data returned an unexpected response.")
+        raise MarketDataError(
+            "Twelve Data returned an unexpected response."
+        )
 
     if payload.get("status") == "error" or "values" not in payload:
         raise MarketDataError(
@@ -69,42 +183,10 @@ async def fetch_candles(symbol, outputsize=1500):
         )
 
     try:
-        frame = pd.DataFrame(payload["values"])
-        required = ["datetime", "open", "high", "low", "close"]
-
-        if any(column not in frame.columns for column in required):
-            raise ValueError("Required candle columns are missing.")
-
-        frame = frame[required].copy()
-        frame["datetime"] = pd.to_datetime(
-            frame["datetime"], utc=True, errors="coerce"
+        frame = _process_candles(
+            payload["values"],
+            timeframe,
         )
-
-        for column in ["open", "high", "low", "close"]:
-            frame[column] = pd.to_numeric(
-                frame[column], errors="coerce"
-            )
-
-        frame = frame.dropna().sort_values("datetime")
-        frame = frame.drop_duplicates("datetime")
-        frame = frame.set_index("datetime")
-        frame = frame[~frame.index.duplicated(keep="last")]
-
-        # Exclude the currently forming one-minute candle.
-        current_minute = pd.Timestamp.now(tz="UTC").floor("min")
-        frame = frame[frame.index < current_minute]
-
-        if len(frame) < 60:
-            raise ValueError("Not enough completed candles were returned.")
-
-        age_minutes = (
-            pd.Timestamp.now(tz="UTC") - frame.index[-1]
-        ).total_seconds() / 60
-
-        if age_minutes > MAX_CANDLE_AGE_MINUTES:
-            raise ValueError(
-                f"Market data is stale ({age_minutes:.1f} minutes old)."
-            )
 
     except (ValueError, TypeError, KeyError) as exc:
         raise MarketDataError(
@@ -112,7 +194,7 @@ async def fetch_candles(symbol, outputsize=1500):
         ) from exc
 
     async with _cache_lock:
-        _cache[symbol] = {
+        _cache[cache_key] = {
             "time": time.time(),
             "data": frame.copy(),
         }
@@ -121,16 +203,55 @@ async def fetch_candles(symbol, outputsize=1500):
 
 
 def resample_candles(frame, timeframe):
-    """Build completed 1m, 5m, or 15m candles from one-minute data."""
+    """
+    Convert smaller-timeframe candles into larger completed candles.
+
+    This supports the strategy module's higher-timeframe context.
+    """
+
+    if frame is None or frame.empty:
+        return pd.DataFrame(
+            columns=["open", "high", "low", "close"]
+        )
+
+    timeframe = _normalise_timeframe(timeframe)
+
+    durations = {
+        "1m": "1min",
+        "5m": "5min",
+        "15m": "15min",
+        "30m": "30min",
+        "1h": "1h",
+        "4h": "4h",
+        "1d": "1day",
+        "1day": "1day",
+    }
+
+    duration = durations[timeframe]
+
+    # Return a copy if the data already uses the requested interval.
     if timeframe == "1m":
         return frame.copy()
 
-    minutes = {"5m": 5, "15m": 15}.get(timeframe)
-    if minutes is None:
-        raise ValueError("Timeframe must be 1m, 5m, or 15m.")
+    required = ["open", "high", "low", "close"]
 
-    aggregated = frame.resample(
-        f"{minutes}min",
+    if any(column not in frame.columns for column in required):
+        raise ValueError("Candle frame is missing OHLC columns.")
+
+    candles = frame[required].copy()
+
+    if not isinstance(candles.index, pd.DatetimeIndex):
+        raise ValueError(
+            "Candle data must have a datetime index."
+        )
+
+    if candles.index.tz is None:
+        candles.index = candles.index.tz_localize("UTC")
+
+    candles = candles.sort_index()
+
+    aggregated = candles.resample(
+        duration,
         origin="epoch",
         label="left",
         closed="left",
@@ -141,10 +262,12 @@ def resample_candles(frame, timeframe):
         "close": "last",
     }).dropna()
 
-    # Keep only candles whose full timeframe has elapsed.
     now = pd.Timestamp.now(tz="UTC")
+    candle_duration = pd.Timedelta(duration)
+
+    # Keep only candles whose full timeframe has elapsed.
     aggregated = aggregated[
-        aggregated.index + pd.Timedelta(minutes=minutes) <= now
+        aggregated.index + candle_duration <= now
     ]
 
     return aggregated

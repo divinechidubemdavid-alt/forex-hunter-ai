@@ -1,12 +1,11 @@
-"""Scheduled daily opportunity scanner for Forex Hunter AI."""
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from io import BytesIO
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import state
+from signal_monitor import monitor_signals_loop
 from config import MARKETS, TELEGRAM_CHANNEL_ID
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
@@ -14,47 +13,149 @@ from chart import create_market_chart
 
 logger = logging.getLogger(__name__)
 
-NIGERIA_TZ = ZoneInfo("Africa/Lagos")
-SCAN_TIMEFRAME = "5m"
-CHECK_INTERVAL_SECONDS = 10
-STARTUP_GRACE_SECONDS = 90
+WAT = ZoneInfo("Africa/Lagos")
 
-# One market per scheduled scan.
-# Times are Nigeria local time (WAT).
-DAILY_SCHEDULE = {
-    6: "GBP/USD",
-    12: "USD/JPY",
-    18: "XAU/USD",
-    0: "BTC/USD",
-}
+SCAN_TIMEFRAME = "15m"
+SCAN_INTERVAL_SECONDS = 60
+MINIMUM_SCAN_INTERVAL_MINUTES = 15
+
+GOLD = "XAU/USD"
+BITCOIN = "BTC/USD"
+
+FOREX_MARKETS = [
+    "EUR/USD",
+    "GBP/USD",
+    "USD/JPY",
+    "AUD/USD",
+    "USD/CAD",
+    "USD/CHF",
+]
+
+ALL_MARKETS = [
+    GOLD,
+    "EUR/USD",
+    "GBP/USD",
+    "USD/JPY",
+    "AUD/USD",
+    "USD/CAD",
+    "USD/CHF",
+    BITCOIN,
+]
 
 
-def _provider_symbol(symbol):
-    return MARKETS[symbol]
+def _is_weekend(now):
+    return now.weekday() >= 5
 
 
-def _slot_key(slot_time):
-    return "auto-scan-slot:" + slot_time.strftime("%Y-%m-%d-%H%M")
+def _forex_market_open(now):
+    """
+    Conservative forex availability window in Nigeria time.
+    Avoids scanning during the normal weekend closure.
+    """
+
+    weekday = now.weekday()
+    current_minutes = now.hour * 60 + now.minute
+
+    # Sunday: wait until the evening opening period.
+    if weekday == 6:
+        return current_minutes >= 22 * 60
+
+    # Friday: stop before the normal evening closure.
+    if weekday == 4:
+        return current_minutes < 22 * 60
+
+    # Saturday: closed.
+    if weekday == 5:
+        return False
+
+    return True
 
 
-def _signal_key(symbol, result):
-    candle_time = str(result.get("candle_time", "unknown"))
-    direction = str(result.get("status", "unknown"))
-    return (
-        f"auto-signal:{symbol}:{SCAN_TIMEFRAME}:"
-        f"{direction}:{candle_time}"
+def _eligible_markets(now):
+    if _is_weekend(now):
+        return [BITCOIN] if BITCOIN in MARKETS else []
+
+    markets = []
+
+    if GOLD in MARKETS:
+        markets.append(GOLD)
+
+    if _forex_market_open(now):
+        markets.extend(
+            market for market in FOREX_MARKETS
+            if market in MARKETS
+        )
+
+    return markets
+
+
+def _next_market(now):
+    """
+    Select the next market using persistent rotation.
+
+    Gold receives approximately half of available scan slots.
+    Other weekday slots rotate across the six forex pairs.
+    Bitcoin is scanned on weekends only.
+    """
+
+    eligible = _eligible_markets(now)
+
+    if not eligible:
+        return None
+
+    if eligible == [BITCOIN]:
+        return BITCOIN
+
+    sequence = []
+
+    # Two Gold slots for every two non-Gold slots.
+    # This gives Gold approximately 50% of weekday scan slots.
+    sequence.extend([
+        GOLD,
+        "EUR/USD",
+        GOLD,
+        "GBP/USD",
+        GOLD,
+        "USD/JPY",
+        GOLD,
+        "AUD/USD",
+        GOLD,
+        "USD/CAD",
+        GOLD,
+        "USD/CHF",
+    ])
+
+    sequence = [
+        market for market in sequence
+        if market in eligible
+    ]
+
+    if not sequence:
+        return eligible[0]
+
+    position = int(
+        state.get_scanner_state("market_rotation_position", 0)
     )
+
+    selected = sequence[position % len(sequence)]
+
+    state.set_scanner_state(
+        "market_rotation_position",
+        position + 1,
+    )
+
+    return selected
 
 
 def _destinations():
-    """Send to people who have started the bot, plus an optional channel."""
     destinations = set()
 
     try:
-        for user_id in state.get_users():
-            destinations.add(str(user_id))
+        destinations.update(
+            str(user_id) for user_id in state.get_users()
+        )
     except Exception:
-        logger.exception("Could not load Telegram bot users.")
+        logger.exception("Could not load registered users.")
 
     if TELEGRAM_CHANNEL_ID:
         destinations.add(str(TELEGRAM_CHANNEL_ID))
@@ -62,133 +163,225 @@ def _destinations():
     return sorted(destinations)
 
 
+def _signal_key(symbol, result):
+    candle_time = str(
+        result.get("candle_time", "unknown")
+    )
+
+    direction = str(
+        result.get("status", "unknown")
+    )
+
+    return (
+        f"adaptive-signal:{symbol}:{SCAN_TIMEFRAME}:"
+        f"{direction}:{candle_time}"
+    )
+
+
 async def _send_signal(app, symbol, result):
     message = format_signal(symbol, result)
+    chart = None
 
-    chart_bytes = None
     try:
         chart = create_market_chart(
-            result.get("candles"),
-            symbol,
-            SCAN_TIMEFRAME,
+            result.get("candles"), symbol, SCAN_TIMEFRAME,
             entry=result.get("entry"),
             stop_loss=result.get("stop_loss"),
             take_profits=result.get("take_profits"),
         )
-        chart_bytes = chart.getvalue()
     except Exception:
-        logger.exception("Could not create automatic scan chart for %s", symbol)
+        logger.exception("Could not create chart for %s.", symbol)
+
+    try:
+        user_ids = state.get_users()
+    except Exception:
+        logger.exception("Could not load registered users.")
+        user_ids = []
+    raw_targets = result.get("take_profits") or []
+    if isinstance(raw_targets, (list, tuple)):
+        targets = list(raw_targets)
+    else:
+        targets = [raw_targets]
+
+    signal_record = {
+        "symbol": symbol,
+        "direction": result.get("status") or result.get("direction"),
+        "timeframe": result.get("timeframe") or SCAN_TIMEFRAME,
+        "entry": result.get("entry"),
+        "stop_loss": result.get("stop_loss"),
+        "tp1": targets[0] if len(targets) > 0 else None,
+        "tp2": targets[1] if len(targets) > 1 else None,
+        "tp3": targets[2] if len(targets) > 2 else None,
+        "take_profits": targets,
+        "score": result.get("score", 0),
+        "strategy": result.get("strategy", ""),
+        "candle_time": str(result.get("candle_time") or "unknown"),
+        "higher_timeframe": result.get("higher_timeframe"),
+    }
+    for user_id in user_ids:
+        try:
+            state.add_signal(user_id, signal_record)
+            logger.info("Saved signal for user %s: %s", user_id, symbol)
+        except Exception:
+            logger.exception("Could not save signal for user %s.", user_id)
 
     destinations = _destinations()
-
     if not destinations:
-        logger.info(
-            "Confirmed %s %s setup, but no Telegram recipients are registered.",
-            result.get("status"), symbol
-        )
+        logger.info("Signal found for %s, but no recipients.", symbol)
         return
 
     for destination in destinations:
         try:
             chat_id = int(destination)
-            if chart_bytes:
-                photo = BytesIO(chart_bytes)
-                photo.name = f"{symbol.replace('/', '_')}_{SCAN_TIMEFRAME}.png"
+            if chart is not None:
+                chart.seek(0)
                 await app.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo,
-                    caption=message,
+                    chat_id=chat_id, photo=chart, caption=message
                 )
             else:
                 await app.bot.send_message(
-                    chat_id=chat_id,
-                    text=message,
+                    chat_id=chat_id, text=message
                 )
         except Exception:
-            logger.exception(
-                "Could not deliver automatic opportunity alert to %s",
-                destination
-            )
+            logger.exception("Could not send signal to %s.", destination)
 
 
-async def _run_one_market(app, symbol):
+async def _scan_market(app, symbol):
     if symbol not in MARKETS:
-        logger.error("Scheduled market %s is not configured.", symbol)
+        logger.warning(
+            "Market %s is not configured.",
+            symbol,
+        )
         return
 
     try:
-        frame = await fetch_candles(_provider_symbol(symbol))
-        result = analyze(frame, SCAN_TIMEFRAME)
+        frame = await fetch_candles(
+            MARKETS[symbol],
+            outputsize=500,
+            interval="15m",
+        )
+
+        result = analyze(
+            frame,
+            SCAN_TIMEFRAME,
+        )
+
         result["symbol"] = symbol
 
-        # No Telegram message for WAIT, stale data, or invalid setups.
         if result.get("status") not in ("BUY", "SELL"):
             logger.info(
-                "Scheduled scan: no confirmed setup for %s. Staying silent.",
-                symbol
+                "No qualifying setup for %s. No notification sent.",
+                symbol,
+            )
+            return
+
+        score = float(result.get("score", 0))
+
+        if score < 70:
+            logger.info(
+                "Signal for %s did not reach the alert threshold.",
+                symbol,
             )
             return
 
         key = _signal_key(symbol, result)
 
-        # Prevent the same closed-candle signal from being broadcast twice.
         if state.get_last_alert(key):
-            logger.info("Duplicate automatic signal suppressed: %s", key)
+            logger.info(
+                "Duplicate signal suppressed: %s",
+                key,
+            )
             return
 
-        # Save before sending to avoid duplicate broadcasts after a restart.
+        # Save before sending to reduce duplicate notifications
+        # if the application restarts during delivery.
         state.set_last_alert(key, "sent")
-        await _send_signal(app, symbol, result)
+
+        await _send_signal(
+            app,
+            symbol,
+            result,
+        )
 
     except MarketDataError as exc:
-        logger.warning("Scheduled scan unavailable for %s: %s", symbol, exc)
+        logger.warning(
+            "Market data unavailable for %s: %s",
+            symbol,
+            exc,
+        )
+
     except Exception:
-        logger.exception("Scheduled scan failed for %s.", symbol)
-
-
-async def _check_due_slot(app):
-    now = datetime.now(NIGERIA_TZ)
-
-    for hour, symbol in DAILY_SCHEDULE.items():
-        slot_time = now.replace(
-            hour=hour, minute=0, second=0, microsecond=0
+        logger.exception(
+            "Automatic scan failed for %s.",
+            symbol,
         )
-        elapsed = (now - slot_time).total_seconds()
-
-        # Run only at the scheduled time or within the short startup grace.
-        # Missed scans are skipped; they are never replayed hours later.
-        if elapsed < 0 or elapsed >= STARTUP_GRACE_SECONDS:
-            continue
-
-        key = _slot_key(slot_time)
-
-        if state.get_last_alert(key):
-            continue
-
-        # Persist the slot before making a market-data request.
-        state.set_last_alert(key, "started")
-
-        logger.info(
-            "Starting scheduled Nigeria-time scan: %s at %s",
-            symbol, slot_time.isoformat()
-        )
-        await _run_one_market(app, symbol)
 
 
 async def auto_scan_loop(app):
-    """Check the clock only; market data is fetched only at scheduled slots."""
+    monitor_task = app.bot_data.get("_signal_monitor_task")
+    if monitor_task is None or monitor_task.done():
+        app.bot_data["_signal_monitor_task"] = asyncio.create_task(
+            monitor_signals_loop(app)
+        )
+
+    """
+    One central adaptive scanning loop.
+
+    It checks the clock frequently but requests market data
+    only when a new scan interval is due.
+    """
+
     logger.info(
-        "Automatic opportunity scanner started. "
-        "Nigeria-time schedule: 00:00 BTC/USD, 06:00 GBP/USD, "
-        "12:00 USD/JPY, 18:00 XAU/USD."
+        "Adaptive Forex Hunter AI scanner started."
     )
 
     while True:
         try:
-            await _check_due_slot(app)
+            now = datetime.now(WAT)
+
+            last_scan = state.get_scanner_state(
+                "last_scan_epoch",
+                0,
+            )
+
+            current_epoch = now.timestamp()
+
+            elapsed_minutes = (
+                current_epoch - float(last_scan)
+            ) / 60
+
+            if elapsed_minutes >= MINIMUM_SCAN_INTERVAL_MINUTES:
+                market = _next_market(now)
+
+                if market:
+                    # Record the slot before requesting data.
+                    state.set_scanner_state(
+                        "last_scan_epoch",
+                        current_epoch,
+                    )
+
+                    logger.info(
+                        "Adaptive scan selected %s at %s WAT.",
+                        market,
+                        now.isoformat(),
+                    )
+
+                    await _scan_market(
+                        app,
+                        market,
+                    )
+
+                else:
+                    logger.info(
+                        "No eligible market is currently open."
+                    )
+
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("Automatic scanner loop error.")
 
-        await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+        except Exception:
+            logger.exception(
+                "Adaptive scanner loop error."
+            )
+
+        await asyncio.sleep(SCAN_INTERVAL_SECONDS)
