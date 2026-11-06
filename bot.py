@@ -201,8 +201,8 @@ async def _fetch_strong_market_frame(symbol):
 async def _refresh_strong_signal_snapshot():
     """Refresh all configured markets and return every currently strong setup.
 
-    A shared 60-second snapshot prevents repeated button taps from consuming
-    another batch of API requests. Market data itself is cached by market_data.
+    A shared 15-minute snapshot matches the 15-minute closed-candle strategy
+    and prevents repeated button taps from consuming more API requests. Market data itself is cached by market_data.
     """
     now = datetime.now(WAT)
     saved = state.get_scanner_state("strong_signals_snapshot", {}) or {}
@@ -214,7 +214,7 @@ async def _refresh_strong_signal_snapshot():
     except (TypeError, ValueError):
         saved_time = None
 
-    if saved_time and (now - saved_time).total_seconds() < 60:
+    if saved_time and (now - saved_time).total_seconds() < 15 * 60:
         return [
             item for item in (
                 state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
