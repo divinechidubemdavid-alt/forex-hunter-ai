@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 
 import state
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from signal_monitor import monitor_signals_loop
 from config import MARKETS, TELEGRAM_CHANNEL_ID
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
@@ -318,14 +317,9 @@ async def _scan_market(app, symbol):
 
 
 async def auto_scan_loop(app):
-    monitor_task = app.bot_data.get("_signal_monitor_task")
-    if monitor_task is None or monitor_task.done():
-        app.bot_data["_signal_monitor_task"] = asyncio.create_task(
-            monitor_signals_loop(app)
-        )
-
     """
-    One central adaptive scanning loop.
+    One central adaptive scanning loop. The signal monitor is started
+    separately by main.py so it runs exactly once.
 
     It checks the clock frequently but requests market data
     only when a new scan interval is due.
