@@ -725,10 +725,14 @@ async def handle_callback(update, context):
             "candle_time": opportunity.get("candle_time"),
             "higher_timeframe": opportunity.get("higher_timeframe"),
         })
-        await query.edit_message_text(
+        message = (
             f"✅ Opportunity saved as tracked signal #{record['id']}. "
             "Automatic monitoring will now follow this signal."
         )
+        if getattr(query.message, "photo", None):
+            await query.edit_message_caption(caption=message)
+        else:
+            await query.edit_message_text(text=message)
         return
 
     if data.startswith("track:"):
@@ -765,12 +769,16 @@ async def handle_callback(update, context):
 
         context.user_data.pop(signal_id, None)
 
-        await query.edit_message_text(
+        message = (
             f"✅ SIGNAL #{record['id']} SAVED\n\n"
             f"{record['symbol']} {record['direction']}\n"
             "It has been added to your tracked signals.\n\n"
             "Automatic milestone monitoring is active for this signal."
         )
+        if getattr(query.message, "photo", None):
+            await query.edit_message_caption(caption=message)
+        else:
+            await query.edit_message_text(text=message)
         return
 
     if data == "signalback":
