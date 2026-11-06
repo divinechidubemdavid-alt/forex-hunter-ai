@@ -199,6 +199,7 @@ def ensure_user(user_id):
             "weakening": True,
             "system": True,
         })
+        user.setdefault("tracking_notification_mode", "silent")
         user.setdefault("risk_percent", 1.0)
         user.setdefault("risk_amount", None)
         user.setdefault("timezone", "Africa/Lagos")
@@ -220,6 +221,7 @@ def update_user_setting(user_id, setting, value):
     allowed = {
         "markets",
         "notifications",
+        "tracking_notification_mode",
         "risk_percent",
         "risk_amount",
         "timezone",

@@ -225,40 +225,184 @@ async def show_strong_signals(update, context):
         await update.message.reply_text(text, reply_markup=keyboard)
 
 
-async def show_tracked_signals(update, context):
-    user_id = _user_id(update)
+def _signal_progress(signal):
+    parts = []
+    for number in (1, 2, 3):
+        hit = bool(signal.get(f"tp{number}_hit"))
+        parts.append(f"TP{number} {'✓' if hit else '○'}")
+    return "  →  ".join(parts)
+
+
+def _tracked_signal_keyboard(signal_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "📈 View chart & details",
+            callback_data=f"signal:{signal_id}",
+        )],
+        [InlineKeyboardButton(
+            "Stop tracking",
+            callback_data=f"stop:{signal_id}",
+        )],
+    ])
+
+
+async def _send_tracked_signals(chat, user_id):
     signals = state.get_tracked_signals(user_id)
-    report = create_tracked_report(signals)
-    await update.message.reply_photo(
-        photo=report,
-        caption="📌 MY TRACKED SIGNALS — visual overview",
-    )
+
     if not signals:
-        await update.message.reply_text(
-            "You are not tracking any signals yet.",
+        await chat.send_message(
+            "📌 MY TRACKED SIGNALS\n\n"
+            "You are not tracking any active signals yet.",
             reply_markup=MENU,
         )
         return
+
+    report = create_tracked_report(signals)
+    await chat.send_photo(
+        photo=report,
+        caption="📌 MY TRACKED SIGNALS — visual overview",
+    )
+
     for signal in signals[:15]:
         signal_id = signal["id"]
+        status = signal.get("status", "TRACKING")
+        progress = _signal_progress(signal)
         text = (
             f"📌 TRACKED SIGNAL #{signal_id}\n\n"
             f"Market: {signal.get('symbol', 'N/A')}\n"
             f"Direction: {signal.get('direction', 'N/A')}\n"
             f"Timeframe: {signal.get('timeframe', 'N/A')}\n"
             f"Entry: {signal.get('entry', 'N/A')}\n"
+            f"Current price: {signal.get('current_price', 'Not updated')}\n"
             f"Stop loss: {signal.get('stop_loss', 'N/A')}\n"
             f"TP1: {signal.get('tp1', 'N/A')}\n"
             f"TP2: {signal.get('tp2', 'N/A')}\n"
-            f"TP3: {signal.get('tp3', 'N/A')}\n"
-            f"Realised R: {signal.get('realised_r', 0)}\n"
-            f"Status: {signal.get('status', 'N/A')}"
+            f"TP3: {signal.get('tp3', 'N/A')}\n\n"
+            f"Progress: {progress}\n"
+            f"Status: {status}\n"
+            f"Realised R: {float(signal.get('realised_r', 0) or 0):+.2f}R\n\n"
+            "Open this signal to view its individual market chart."
         )
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("Stop tracking", callback_data=f"stop:{signal_id}")
-        ]])
-        await update.message.reply_text(text, reply_markup=keyboard)
+        await chat.send_message(
+            text,
+            reply_markup=_tracked_signal_keyboard(signal_id),
+        )
 
+
+async def show_tracked_signals(update, context):
+    await _send_tracked_signals(
+        update.effective_chat,
+        _user_id(update),
+    )
+
+
+async def _show_signal_detail(chat, user_id, signal_id):
+    signal = state.get_signal(signal_id, user_id)
+    if not signal:
+        await chat.send_message(
+            "This signal could not be found or does not belong to your account."
+        )
+        return
+
+    progress = _signal_progress(signal)
+    status = signal.get("status", "TRACKING")
+    current_price = signal.get("current_price", "Not available yet")
+    last_checked = signal.get("last_checked", "Not checked yet")
+    events = state.get_signal_events(signal_id, user_id)
+    recent_events = events[-4:]
+    event_lines = [
+        f"• {event.get('type')}: {event.get('message')}"
+        for event in recent_events
+    ]
+    event_text = "\n".join(event_lines) if event_lines else "No milestones recorded yet."
+
+    caption = (
+        f"📈 {signal.get('symbol', 'Unknown')} — "
+        f"{signal.get('direction', 'N/A')}\n"
+        f"Signal #{signal_id}  |  {str(signal.get('timeframe', '15m')).upper()}\n\n"
+        f"Entry: {signal.get('entry', 'N/A')}\n"
+        f"Current price: {current_price}\n"
+        f"Stop loss: {signal.get('stop_loss', 'N/A')}\n"
+        f"TP1: {signal.get('tp1', 'N/A')}\n"
+        f"TP2: {signal.get('tp2', 'N/A')}\n"
+        f"TP3: {signal.get('tp3', 'N/A')}\n\n"
+        f"Progress: {progress}\n"
+        f"Status: {status}\n"
+        f"Realised result: {float(signal.get('realised_r', 0) or 0):+.2f}R\n"
+        f"Last market check: {last_checked}\n\n"
+        f"RECENT EVENTS\n{event_text}\n\n"
+        "Signal tracking is analytical and does not confirm broker execution."
+    )
+
+    keyboard_rows = []
+    if status == "TRACKING":
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                "🔄 Refresh Chart",
+                callback_data=f"signalrefresh:{signal_id}",
+            )
+        ])
+    keyboard_rows.append([
+        InlineKeyboardButton(
+            "⬅️ Back to Tracked Signals",
+            callback_data="signalback",
+        )
+    ])
+    if status == "TRACKING":
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                "Stop tracking",
+                callback_data=f"stop:{signal_id}",
+            )
+        ])
+    keyboard = InlineKeyboardMarkup(keyboard_rows)
+
+    try:
+        timeframe = str(signal.get("timeframe") or "15m")
+        frame = await fetch_candles(
+            MARKETS[signal["symbol"]],
+            outputsize=100,
+            interval=timeframe,
+            purpose="monitor",
+        )
+        latest_chart_price = float(frame["close"].iloc[-1])
+        caption = caption.replace(
+            f"Current price: {current_price}",
+            f"Latest closed-candle price: {latest_chart_price:g}",
+        )
+        caption = caption[:950]
+        targets = [
+            signal.get("tp1"),
+            signal.get("tp2"),
+            signal.get("tp3"),
+        ]
+        chart = create_market_chart(
+            frame,
+            signal.get("symbol", "Unknown"),
+            timeframe,
+            entry=signal.get("entry"),
+            stop_loss=signal.get("stop_loss"),
+            take_profits=targets,
+        )
+        await chat.send_photo(
+            photo=chart,
+            caption=caption,
+            reply_markup=keyboard,
+        )
+    except (MarketDataError, ValueError, KeyError) as exc:
+        await chat.send_message(
+            caption
+            + "\n\n⚠️ The chart could not be refreshed right now: "
+            + str(exc)
+            + "\nYour saved signal and tracking record are unchanged.",
+            reply_markup=keyboard,
+        )
+    except Exception:
+        logger.exception("Could not render tracked signal chart %s.", signal_id)
+        await chat.send_message(
+            caption + "\n\n⚠️ Chart rendering is temporarily unavailable.",
+            reply_markup=keyboard,
+        )
 
 def _performance_summary(signals):
     signals = list(signals or [])
@@ -373,13 +517,21 @@ async def show_settings(update, context):
     settings = state.get_user_settings(user_id)
     timeframe = state.get_timeframe(user_id)
     usage = state.get_api_usage()
+    mode = settings.get("tracking_notification_mode", "silent")
+    mode_labels = {
+        "silent": "Silent Monitoring",
+        "important": "Important Alerts Only",
+        "all": "All Updates",
+    }
+    mode_label = mode_labels.get(mode, "Silent Monitoring")
 
     text = (
         "⚙️ PERSONAL SETTINGS\n\n"
         f"Default timeframe: {timeframe}\n"
         f"Preferred markets: {', '.join(settings.get('markets', []))}\n"
         f"Risk preference: {settings.get('risk_percent', 1.0)}%\n"
-        f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\n\n"
+        f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\n"
+        f"Tracking notifications: {mode_label}\n\n"
         "API safety counter:\n"
         f"{usage['used']} / {usage['limit']} requests recorded today\n"
         f"Remaining local request allowance: {usage['remaining']}\n\n"
@@ -398,6 +550,12 @@ async def show_settings(update, context):
             InlineKeyboardButton(
                 "Change risk preference",
                 callback_data="settings:risk",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Signal notification mode",
+                callback_data="settings:notifications",
             )
         ],
     ])
@@ -567,10 +725,14 @@ async def handle_callback(update, context):
             "candle_time": opportunity.get("candle_time"),
             "higher_timeframe": opportunity.get("higher_timeframe"),
         })
-        await query.edit_message_text(
+        message = (
             f"✅ Opportunity saved as tracked signal #{record['id']}. "
             "Automatic monitoring will now follow this signal."
         )
+        if getattr(query.message, "photo", None):
+            await query.edit_message_caption(caption=message)
+        else:
+            await query.edit_message_text(text=message)
         return
 
     if data.startswith("track:"):
@@ -607,11 +769,80 @@ async def handle_callback(update, context):
 
         context.user_data.pop(signal_id, None)
 
-        await query.edit_message_text(
+        message = (
             f"✅ SIGNAL #{record['id']} SAVED\n\n"
             f"{record['symbol']} {record['direction']}\n"
             "It has been added to your tracked signals.\n\n"
             "Automatic milestone monitoring is active for this signal."
+        )
+        if getattr(query.message, "photo", None):
+            await query.edit_message_caption(caption=message)
+        else:
+            await query.edit_message_text(text=message)
+        return
+
+    if data == "signalback":
+        await _send_tracked_signals(query.message.chat, user_id)
+        return
+
+    if data.startswith("signalrefresh:"):
+        signal_id = data.split(":", 1)[1]
+        await _show_signal_detail(query.message.chat, user_id, signal_id)
+        return
+
+    if data.startswith("signal:"):
+        signal_id = data.split(":", 1)[1]
+        await _show_signal_detail(query.message.chat, user_id, signal_id)
+        return
+
+    if data == "settings:notifications":
+        current = state.get_user_settings(user_id).get(
+            "tracking_notification_mode", "silent"
+        )
+        labels = {
+            "silent": "Silent Monitoring",
+            "important": "Important Alerts Only",
+            "all": "All Updates",
+        }
+        rows = [
+            [InlineKeyboardButton(
+                ("✓ " if current == "silent" else "") + "Silent Monitoring",
+                callback_data="notify:silent",
+            )],
+            [InlineKeyboardButton(
+                ("✓ " if current == "important" else "") + "Important Alerts Only",
+                callback_data="notify:important",
+            )],
+            [InlineKeyboardButton(
+                ("✓ " if current == "all" else "") + "All Updates",
+                callback_data="notify:all",
+            )],
+        ]
+        await query.edit_message_text(
+            "Choose how Forex Hunter AI should notify you about tracked-signal events.\n\n"
+            "Silent Monitoring: no TP/SL messages; progress stays in My Tracked Signals.\n"
+            "Important Alerts Only: notify on TP1, TP2, TP3 and stop loss.\n"
+            "All Updates: notify on every recorded monitoring outcome, including ambiguous outcomes.\n\n"
+            f"Current setting: {labels.get(current, 'Silent Monitoring')}",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+        return
+
+    if data.startswith("notify:"):
+        mode = data.split(":", 1)[1]
+        if mode not in {"silent", "important", "all"}:
+            await query.edit_message_text("That notification mode is not supported.")
+            return
+        state.update_user_setting(
+            user_id, "tracking_notification_mode", mode
+        )
+        labels = {
+            "silent": "Silent Monitoring",
+            "important": "Important Alerts Only",
+            "all": "All Updates",
+        }
+        await query.edit_message_text(
+            f"✅ Tracking notifications set to: {labels[mode]}."
         )
         return
 
@@ -623,13 +854,17 @@ async def handle_callback(update, context):
             user_id,
         )
 
-        await query.edit_message_text(
+        message = (
             "Tracking stopped. The signal history is preserved. "
             "This is not recorded as a win or loss."
             if stopped
             else "This signal could not be stopped. "
                  "It may already be completed or belong to another user."
         )
+        if getattr(query.message, "photo", None):
+            await query.edit_message_caption(caption=message)
+        else:
+            await query.edit_message_text(text=message)
         return
 
     if data == "settings:timeframe":

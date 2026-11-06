@@ -74,9 +74,31 @@ def _realised_r(flags, stop_hit=False):
 
 
 async def _notify(app, user_id, settings, notification_key, message):
-    notifications = settings.get("notifications") or {}
-    if not notifications.get(notification_key, True):
+    """
+    Apply the user's tracking-notification mode.
+
+    Silent mode stores all milestones without Telegram alerts.
+    Important mode alerts only for TP1/TP2/TP3 and stop loss.
+    All mode alerts for every recorded monitoring outcome/event.
+    """
+    mode = str(
+        settings.get("tracking_notification_mode", "silent")
+    ).lower()
+
+    if mode == "silent":
         return
+
+    important_events = {"tp1", "tp2", "tp3", "stop_loss"}
+    if mode == "important" and notification_key not in important_events:
+        return
+
+    if mode not in {"important", "all"}:
+        logger.warning(
+            "Unknown tracking notification mode %r for user %s; using silent.",
+            mode, user_id,
+        )
+        return
+
     try:
         await app.bot.send_message(chat_id=int(user_id), text=message)
     except Exception:
