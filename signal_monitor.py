@@ -11,7 +11,7 @@ from market_data import fetch_candles, MarketDataError
 
 logger = logging.getLogger(__name__)
 
-MONITOR_INTERVAL_SECONDS = 300
+MONITOR_INTERVAL_SECONDS = 15 * 60
 PARTIAL_FRACTION = 1.0 / 3.0
 
 
@@ -208,7 +208,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         )
         state.complete_signal(
             signal_id,
-            "STOP LOSS",
+            "STOP_LOSS",
             f"Stop loss reached. Realised result: {realised:+.2f}R.",
         )
         await _notify(
