@@ -297,6 +297,7 @@ async def _monitor_cycle(app):
                 MARKETS[symbol],
                 outputsize=100,
                 interval=timeframe,
+                purpose="monitor",
             )
             if frame is None or frame.empty:
                 continue
