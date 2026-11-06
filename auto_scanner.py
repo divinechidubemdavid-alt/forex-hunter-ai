@@ -221,6 +221,9 @@ async def _send_signal(app, symbol, result):
 
     delivered = 0
     for user_id in user_ids:
+        delivery_key = f"{opportunity_key}:user:{user_id}"
+        if state.get_last_alert(delivery_key):
+            continue
         try:
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
@@ -240,11 +243,14 @@ async def _send_signal(app, symbol, result):
                     reply_markup=keyboard,
                 )
             delivered += 1
+            state.set_last_alert(delivery_key, "sent")
         except Exception:
             logger.exception("Could not send opportunity to user %s.", user_id)
 
     if TELEGRAM_CHANNEL_ID:
-        try:
+        channel_delivery_key = f"{opportunity_key}:channel:{TELEGRAM_CHANNEL_ID}"
+        if not state.get_last_alert(channel_delivery_key):
+            try:
             if chart is not None:
                 chart.seek(0)
                 await app.bot.send_photo(
@@ -255,9 +261,10 @@ async def _send_signal(app, symbol, result):
                 await app.bot.send_message(
                     chat_id=int(TELEGRAM_CHANNEL_ID), text=message,
                 )
-            delivered += 1
-        except Exception:
-            logger.exception("Could not publish opportunity to channel.")
+                delivered += 1
+                state.set_last_alert(channel_delivery_key, "sent")
+            except Exception:
+                logger.exception("Could not publish opportunity to channel.")
 
     if delivered == 0:
         logger.warning("Opportunity for %s saved, but no destination received it.", symbol)
@@ -304,19 +311,10 @@ async def _scan_market(app, symbol):
 
         key = _signal_key(symbol, result)
 
-        if state.get_last_alert(key):
-            logger.info(
-                "Duplicate signal suppressed: %s",
-                key,
-            )
-            return
-
         delivered = await _send_signal(app, symbol, result)
-        if delivered:
-            state.set_last_alert(key, "sent")
-        else:
-            logger.warning(
-                "No delivery confirmed for %s; leaving alert eligible for retry.",
+        if not delivered:
+            logger.info(
+                "No new delivery confirmed for %s; failed destinations remain eligible for retry.",
                 key,
             )
 
