@@ -310,40 +310,6 @@ def _breakout_retest_setup(data):
 
 
 
-def _market_structure_setup(data):
-    """Detect a market-structure break followed by a retest."""
-    if len(data) < 35:
-        return None
-    last = data.iloc[-1]
-    previous = data.iloc[-2]
-    structure = data.iloc[-22:-2]
-    if structure.empty:
-        return None
-    atr = _safe_float(last["atr"])
-    if atr <= 0:
-        return None
-    swing_high = _safe_float(structure["high"].max())
-    swing_low = _safe_float(structure["low"].min())
-    tolerance = atr * 0.25
-    bullish = (
-        previous["close"] > swing_high
-        and last["low"] <= swing_high + tolerance
-        and last["close"] > swing_high
-        and last["close"] > last["open"]
-    )
-    bearish = (
-        previous["close"] < swing_low
-        and last["high"] >= swing_low - tolerance
-        and last["close"] < swing_low
-        and last["close"] < last["open"]
-    )
-    if bullish:
-        return "BUY"
-    if bearish:
-        return "SELL"
-    return None
-
-
 def _calculate_score(last, previous, direction, strategy):
     """Calculate setup quality, not probability of winning."""
 
@@ -419,10 +385,6 @@ def _calculate_score(last, previous, direction, strategy):
     elif strategy == "BREAKOUT_RETEST":
         score += 20
         reasons.append("Breakout and retest confirmed")
-
-    elif strategy == "STRUCTURE_BOS":
-        score += 20
-        reasons.append("Market-structure break and retest confirmed")
 
     # Volatility: 10 points.
     atr = _safe_float(last["atr"])
@@ -567,54 +529,46 @@ def analyze(frame, timeframe="15m"):
         )
         return result
 
-    # At least two of the three methods must agree.
-    strategy_checks = [
-        (_trend_setup(last, previous), "EMA_TREND"),
-        (_breakout_retest_setup(data), "BREAKOUT_RETEST"),
-        (_market_structure_setup(data), "STRUCTURE_BOS"),
-    ]
-    candidates = [
-        (side, name) for side, name in strategy_checks
-        if side in ("BUY", "SELL")
-    ]
-    if not candidates:
+    # Either of the two complementary methods may qualify independently.
+    trend_direction = _trend_setup(last, previous)
+    breakout_direction = _breakout_retest_setup(data)
+
+    if (trend_direction in ("BUY", "SELL") and
+            breakout_direction in ("BUY", "SELL") and
+            trend_direction != breakout_direction):
         result["reason"] = (
-            "No confirmed EMA trend, breakout-retest, or "
-            "market-structure break-and-retest setup."
+            "EMA trend and breakout-retest point in opposite directions. "
+            "Waiting for the market to align."
         )
         return result
 
-    buy_votes = sum(side == "BUY" for side, _ in candidates)
-    sell_votes = sum(side == "SELL" for side, _ in candidates)
-    if buy_votes >= 2:
-        direction = "BUY"
-    elif sell_votes >= 2:
-        direction = "SELL"
+    if trend_direction in ("BUY", "SELL"):
+        direction = trend_direction
+        primary_strategy = "EMA_TREND"
+    elif breakout_direction in ("BUY", "SELL"):
+        direction = breakout_direction
+        primary_strategy = "BREAKOUT_RETEST"
     else:
         result["reason"] = (
-            "Fewer than two of the three strategies agree, "
-            "or the strategies conflict. Waiting for confirmation."
+            "No valid EMA trend-following or breakout-retest setup yet. "
+            "Waiting for a clearer opportunity."
         )
         return result
 
-    agreeing = [name for side, name in candidates if side == direction]
     labels = {
         "EMA_TREND": "EMA Trend Following",
         "BREAKOUT_RETEST": "Breakout and Retest",
-        "STRUCTURE_BOS": "Market Structure Break and Retest",
     }
-    strategy = " + ".join(labels[name] for name in agreeing)
-    score_parts = [
-        _calculate_score(last, previous, direction, name)
-        for name in agreeing
-    ]
-    score = min(100, int(sum(item[0] for item in score_parts) / len(score_parts)) + 3)
-    reasons = list(dict.fromkeys(
-        reason
-        for _, strategy_reasons in score_parts
-        for reason in strategy_reasons
-    ))
-    reasons.append(f"Strategy consensus: {len(agreeing)}/3 agree")
+    strategy = labels[primary_strategy]
+    score, reasons = _calculate_score(last, previous, direction, primary_strategy)
+
+    if trend_direction == direction and breakout_direction == direction:
+        score = min(100, score + 8)
+        reasons.append("Both strategies confirm the same direction")
+        strategy = "EMA Trend Following + Breakout and Retest"
+    else:
+        reasons.append(f"{labels[primary_strategy]} setup identified")
+
 
     # Higher timeframe context adjusts the score.
     context = result["higher_timeframe"]
