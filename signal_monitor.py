@@ -51,15 +51,26 @@ def _targets(signal):
     return [_number(value) for value in values[:3]]
 
 
-def _realised_r(flags):
-    # Each target closes one-third of the original position.
+def _realised_r(flags, stop_hit=False):
+    """
+    Realised R for one-third exits at +1R, +2R and +3R.
+
+    An open position only records exits already achieved. The unclosed
+    fraction is charged -1R per fraction only when the stop is reached.
+    """
     earned = sum(
         (index + 1) * PARTIAL_FRACTION
         for index, hit in enumerate(flags)
         if hit
     )
-    remaining = 3 - sum(bool(hit) for hit in flags)
-    return earned - remaining * PARTIAL_FRACTION
+    if not stop_hit:
+        return earned
+
+    remaining_fraction = max(
+        0.0,
+        1.0 - sum(PARTIAL_FRACTION for hit in flags if hit),
+    )
+    return earned - remaining_fraction
 
 
 async def _notify(app, user_id, settings, notification_key, message):
