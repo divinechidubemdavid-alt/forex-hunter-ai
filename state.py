@@ -5,12 +5,13 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from config import (
     STATE_FILE,
     TWELVE_DATA_DAILY_CREDIT_LIMIT,
     MIN_REQUEST_INTERVAL_SECONDS,
-    API_RESERVE_CREDITS,
+    API_RESERVE_REQUESTS,
 )
 
 _lock = threading.RLock()
@@ -21,7 +22,7 @@ def _now():
 
 
 def _today():
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(ZoneInfo("Africa/Lagos")).date().isoformat()
 
 
 def _empty_state():
@@ -123,7 +124,7 @@ def reserve_api_request(purpose='manual'):
 
         purpose = str(purpose).lower()
         if purpose == "auto":
-            automatic_limit = max(0, limit - int(API_RESERVE_CREDITS))
+            automatic_limit = max(0, limit - int(API_RESERVE_REQUESTS))
             if used >= automatic_limit:
                 return False, (
                     "Automatic scanner paused to protect the reserved "
@@ -133,7 +134,7 @@ def reserve_api_request(purpose='manual'):
         if used >= limit:
             return False, (
                 "Daily API safety limit reached. "
-                "The counter resets on the next UTC day."
+                "The counter resets at midnight Nigeria time."
             )
 
         now = time.time()
