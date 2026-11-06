@@ -384,11 +384,16 @@ async def _show_signal_detail(chat, user_id, signal_id):
             stop_loss=signal.get("stop_loss"),
             take_profits=targets,
         )
-        await chat.send_photo(
+        sent_message = await chat.send_photo(
             photo=chart,
             caption=caption,
             reply_markup=keyboard,
         )
+        state.update_signal(signal_id, {
+            "chart_chat_id": chat.id,
+            "chart_message_id": sent_message.message_id,
+            "chart_last_update": datetime.now(WAT).isoformat(),
+        })
     except (MarketDataError, ValueError, KeyError) as exc:
         await chat.send_message(
             caption
