@@ -1,6 +1,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -374,6 +375,25 @@ async def _refresh_saved_chart(app, user_id, signal, frame):
         )
 
 
+
+async def _fetch_monitor_frame(symbol, timeframe):
+    """Respect the shared provider cooldown instead of silently skipping a market."""
+    for attempt in range(5):
+        try:
+            return await fetch_candles(
+                MARKETS[symbol],
+                outputsize=100,
+                interval=timeframe,
+                purpose="monitor",
+            )
+        except MarketDataError as exc:
+            match = re.search(r"cooldown active\. Try again in ([0-9.]+) seconds", str(exc))
+            if not match or attempt == 4:
+                raise
+            await asyncio.sleep(float(match.group(1)) + 0.25)
+    return None
+
+
 async def _monitor_cycle(app):
     # Collect each user's signals, then fetch candles once per
     # market/timeframe combination for all users.
@@ -403,12 +423,7 @@ async def _monitor_cycle(app):
 
     for (symbol, timeframe), records in grouped.items():
         try:
-            frame = await fetch_candles(
-                MARKETS[symbol],
-                outputsize=100,
-                interval=timeframe,
-                purpose="monitor",
-            )
+            frame = await _fetch_monitor_frame(symbol, timeframe)
             if frame is None or frame.empty:
                 continue
 
