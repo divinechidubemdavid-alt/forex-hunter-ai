@@ -190,7 +190,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         return
 
     if stop_hit:
-        realised = _realised_r(flags)
+        realised = _realised_r(flags, stop_hit=True)
         updates.update({
             "stop_loss_hit": True,
             "realised_r": realised,
@@ -199,7 +199,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         state.update_signal(signal_id, updates)
         state.add_signal_event(
             signal_id,
-            "STOP LOSS",
+            "STOP_LOSS",
             f"Stop loss reached. Realised result: {realised:+.2f}R.",
             {
                 "realised_r": realised,
