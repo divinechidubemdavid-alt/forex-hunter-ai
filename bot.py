@@ -365,6 +365,12 @@ async def _show_signal_detail(chat, user_id, signal_id):
             interval=timeframe,
             purpose="monitor",
         )
+        latest_chart_price = float(frame["close"].iloc[-1])
+        caption = caption.replace(
+            f"Current price: {current_price}",
+            f"Latest closed-candle price: {latest_chart_price:g}",
+        )
+        caption = caption[:950]
         targets = [
             signal.get("tp1"),
             signal.get("tp2"),
