@@ -394,34 +394,27 @@ async def analyse_market(update, context, symbol, timeframe):
             take_profits=result.get("take_profits"),
         )
 
-        if float(result.get("score", 0)) >= 70:
-            signal_id = (
-                f"manual-{user_id}-"
-                f"{int(datetime.now().timestamp())}"
+        signal_id = (
+            f"manual-{user_id}-"
+            f"{int(datetime.now().timestamp())}"
+        )
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                "📌 TRACK THIS SIGNAL",
+                callback_data=f"track:{signal_id}",
             )
-
-            keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "📌 TRACK THIS SIGNAL",
-                        callback_data=f"track:{signal_id}",
-                    )
-                ]
-            ])
-
-            context.user_data[signal_id] = {
-                "symbol": symbol,
-                "direction": result["status"],
-                "timeframe": timeframe,
-                "entry": result.get("entry"),
-                "stop_loss": result.get("stop_loss"),
-                "take_profits": result.get("take_profits", []),
-                "score": result.get("score", 0),
-                "strategy": result.get("strategy", ""),
-                "candle_time": str(frame.index[-1]),
-            }
-        else:
-            keyboard = None
+        ]])
+        context.user_data[signal_id] = {
+            "symbol": symbol,
+            "direction": result["status"],
+            "timeframe": timeframe,
+            "entry": result.get("entry"),
+            "stop_loss": result.get("stop_loss"),
+            "take_profits": result.get("take_profits", []),
+            "score": result.get("score", 0),
+            "strategy": result.get("strategy", ""),
+            "candle_time": str(frame.index[-1]),
+        }
 
         chart.seek(0)
 
