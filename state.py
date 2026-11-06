@@ -39,6 +39,8 @@ def _empty_state():
         "next_signal_id": 1,
         "scanner_state": {},
         "api_budget": {},
+        "opportunities": {},
+        "next_opportunity_id": 1,
     }
 
 
@@ -524,6 +526,59 @@ def get_signal_events(signal_id=None, user_id=None):
             events.append(dict(event))
 
         return events
+
+
+# ---------------------------------------------------------
+# AUTOMATIC OPPORTUNITY FEED (NOT USER TRACKING)
+# ---------------------------------------------------------
+
+def add_opportunity(key, opportunity):
+    """Store a scanner opportunity separately from tracked signals."""
+    with _lock:
+        key = str(key)
+        for existing in _state["opportunities"].values():
+            if existing.get("key") == key:
+                return dict(existing)
+
+        opportunity_id = str(_state["next_opportunity_id"])
+        _state["next_opportunity_id"] += 1
+        record = dict(opportunity)
+        record.update({
+            "id": opportunity_id,
+            "key": key,
+            "created_at": _now(),
+        })
+        _state["opportunities"][opportunity_id] = record
+
+        # Keep a bounded feed so the state file does not grow forever.
+        if len(_state["opportunities"]) > 300:
+            oldest = sorted(
+                _state["opportunities"].items(),
+                key=lambda item: item[1].get("created_at", ""),
+            )
+            for old_id, _ in oldest[:len(_state["opportunities"]) - 300]:
+                _state["opportunities"].pop(old_id, None)
+
+        _save()
+        return dict(record)
+
+
+def get_opportunities(limit=30):
+    with _lock:
+        records = [
+            dict(item) for item in _state["opportunities"].values()
+        ]
+        records.sort(
+            key=lambda item: item.get("created_at", ""),
+            reverse=True,
+        )
+        return records[:max(1, int(limit))]
+
+
+def get_opportunity(opportunity_id):
+    with _lock:
+        item = _state["opportunities"].get(str(opportunity_id))
+        return dict(item) if item else None
 
 
 # ---------------------------------------------------------
