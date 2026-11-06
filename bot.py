@@ -241,8 +241,8 @@ async def _refresh_strong_signal_snapshot():
             raw_targets = result.get("take_profits") or []
             targets = list(raw_targets) if isinstance(raw_targets, (list, tuple)) else [raw_targets]
             key = (
-                f"strong-refresh:{symbol}:15m:{result['status']}:"
-                f"{result['candle_time']}"
+                f"adaptive-signal:{symbol}:15m:"
+                f"{result['status']}:{result['candle_time']}"
             )
             opportunity = state.add_opportunity(key, {
                 "symbol": symbol,
