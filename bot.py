@@ -653,7 +653,6 @@ async def show_settings(update, context):
     user_id = _user_id(update)
     settings = state.get_user_settings(user_id)
     timeframe = state.get_timeframe(user_id)
-    usage = state.get_api_usage()
     mode = settings.get("tracking_notification_mode", "silent")
     mode_labels = {
         "silent": "Silent Monitoring",
@@ -669,14 +668,16 @@ async def show_settings(update, context):
         f"Risk preference: {settings.get('risk_percent', 1.0)}%\n"
         f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\n"
         f"Tracking notifications: {mode_label}\n\n"
-        "API safety counter:\n"
-        f"{usage['used']} / {usage['limit']} requests recorded today\n"
-        f"Remaining local request allowance: {usage['remaining']}\n\n"
-        "The API counter counts local requests; it is not a live "
-        "Twelve Data credit statement."
+        "Choose a setting below."
     )
 
     keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "📡 API Usage",
+                callback_data="settings:api_usage",
+            )
+        ],
         [
             InlineKeyboardButton(
                 "Change default timeframe",
@@ -701,6 +702,36 @@ async def show_settings(update, context):
         text,
         reply_markup=keyboard,
     )
+
+
+async def show_api_usage(chat):
+    usage = state.get_api_usage()
+    used = usage["used"]
+    limit = usage["limit"]
+    remaining = usage["remaining"]
+    percent = (used / limit * 100) if limit else 0
+
+    text = (
+        "📡 API USAGE\n\n"
+        f"Date: {usage['date']} (Nigeria time)\n"
+        f"Requests recorded today: {used:,} / {limit:,}\n"
+        f"Remaining local allowance: {remaining:,}\n"
+        f"Usage: {percent:.1f}%\n\n"
+        "Safety notes:\n"
+        "• The local daily ceiling is 800 requests.\n"
+        "• 100 request slots are reserved for manual analysis and monitoring.\n"
+        "• Automatic scanning stops at its protected allowance.\n\n"
+        "This counter records requests made by the bot. It is not a live "
+        "Twelve Data credit or billing statement."
+    )
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "⬅️ Back to Settings",
+            callback_data="settings:back",
+        )
+    ]])
+    await chat.send_message(text, reply_markup=keyboard)
 
 
 async def analyse_market(update, context, symbol, timeframe):
@@ -942,6 +973,38 @@ async def handle_callback(update, context):
     if data.startswith("signal:"):
         signal_id = data.split(":", 1)[1]
         await _show_signal_detail(query.message.chat, user_id, signal_id)
+        return
+
+    if data == "settings:api_usage":
+        await show_api_usage(query.message.chat)
+        return
+
+    if data == "settings:back":
+        settings = state.get_user_settings(user_id)
+        timeframe = state.get_timeframe(user_id)
+        mode = settings.get("tracking_notification_mode", "silent")
+        mode_labels = {
+            "silent": "Silent Monitoring",
+            "important": "Important Alerts Only",
+            "all": "All Updates",
+        }
+        mode_label = mode_labels.get(mode, "Silent Monitoring")
+        text = (
+            "⚙️ PERSONAL SETTINGS\\n\\n"
+            f"Default timeframe: {timeframe}\\n"
+            f"Preferred markets: {', '.join(settings.get('markets', []))}\\n"
+            f"Risk preference: {settings.get('risk_percent', 1.0)}%\\n"
+            f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\\n"
+            f"Tracking notifications: {mode_label}\\n\\n"
+            "Choose a setting below."
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📡 API Usage", callback_data="settings:api_usage")],
+            [InlineKeyboardButton("Change default timeframe", callback_data="settings:timeframe")],
+            [InlineKeyboardButton("Change risk preference", callback_data="settings:risk")],
+            [InlineKeyboardButton("Signal notification mode", callback_data="settings:notifications")],
+        ])
+        await query.edit_message_text(text, reply_markup=keyboard)
         return
 
     if data == "settings:notifications":
