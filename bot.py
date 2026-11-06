@@ -897,24 +897,28 @@ async def handle_callback(update, context):
     if data == "settings:risk":
         rows = [
             [
-                InlineKeyboardButton(
-                    "0.5%",
-                    callback_data="risk:0.5",
-                ),
-                InlineKeyboardButton(
-                    "1%",
-                    callback_data="risk:1",
-                ),
-                InlineKeyboardButton(
-                    "2%",
-                    callback_data="risk:2",
-                ),
-            ]
+                InlineKeyboardButton("0.5%", callback_data="risk:0.5"),
+                InlineKeyboardButton("1%", callback_data="risk:1"),
+                InlineKeyboardButton("2%", callback_data="risk:2"),
+            ],
+            [InlineKeyboardButton("✍️ Custom percentage", callback_data="risk:custom")],
         ]
-
         await query.edit_message_text(
-            "Choose your preferred risk percentage:",
+            "Choose your preferred risk percentage.\n\n"
+            "You can select a preset or enter a custom value from 0.1% to 5%. "
+            "This setting is a planning preference only; the bot does not "
+            "calculate broker lot sizes or place trades.",
             reply_markup=InlineKeyboardMarkup(rows),
+        )
+        return
+
+    if data == "risk:custom":
+        context.user_data["awaiting_custom_risk"] = True
+        await query.edit_message_text(
+            "✍️ Send your custom risk percentage as a number.\n\n"
+            "Examples: 0.75, 1.25, or 1.5\n"
+            "Allowed range: 0.1% to 5%.\n\n"
+            "Send /cancel to leave this setting unchanged."
         )
         return
 
@@ -940,6 +944,39 @@ async def handle_callback(update, context):
 
 async def handle_text(update, context):
     text = (update.message.text or "").strip()
+
+    if text == "/cancel" and context.user_data.get("awaiting_custom_risk"):
+        context.user_data.pop("awaiting_custom_risk", None)
+        await update.message.reply_text(
+            "Custom risk entry cancelled. Your previous setting is unchanged.",
+            reply_markup=MENU,
+        )
+        return
+
+    if context.user_data.get("awaiting_custom_risk"):
+        try:
+            risk = float(text.replace("%", "").strip())
+        except ValueError:
+            await update.message.reply_text(
+                "Please enter a valid number, for example 0.75 or 1.25. "
+                "Allowed range: 0.1% to 5%."
+            )
+            return
+        if not 0.1 <= risk <= 5.0:
+            await update.message.reply_text(
+                "That value is outside the allowed range. Enter 0.1% to 5%."
+            )
+            return
+        state.update_user_setting(_user_id(update), "risk_percent", risk)
+        context.user_data.pop("awaiting_custom_risk", None)
+        await update.message.reply_text(
+            f"✅ Custom risk preference saved: {risk:g}%.\n\n"
+            "This is a planning preference, not a broker order or automatic "
+            "lot-size calculation. Always calculate position size from your "
+            "account balance and technical stop-loss distance.",
+            reply_markup=MENU,
+        )
+        return
 
     if text == "🔎 Market Scanner":
         await show_market_scanner(update, context)
