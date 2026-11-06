@@ -302,14 +302,33 @@ async def _monitor_cycle(app):
             if frame is None or frame.empty:
                 continue
 
-            candle = frame.iloc[-1]
-            candle_time = frame.index[-1]
-
-            for user_id, signal in records:
+            for user_id, original_signal in records:
+                signal = original_signal
                 try:
-                    await _check_one_signal(
-                        app, user_id, signal, candle, candle_time
-                    )
+                    last_checked = _timestamp(signal.get("last_checked"))
+                    signal_time = _timestamp(signal.get("candle_time"))
+                    pending_candles = frame
+                    if last_checked is not None:
+                        pending_candles = pending_candles[
+                            pending_candles.index > last_checked
+                        ]
+                    if signal_time is not None:
+                        pending_candles = pending_candles[
+                            pending_candles.index > signal_time
+                        ]
+
+                    # Process every unseen closed candle, not only the latest
+                    # one. This prevents 1m/5m signals from skipping price
+                    # touches between 15-minute monitor cycles.
+                    for candle_time, candle in pending_candles.iterrows():
+                        current = state.get_signal(
+                            _signal_id(signal), user_id
+                        )
+                        if not current or current.get("status") != "TRACKING":
+                            break
+                        await _check_one_signal(
+                            app, user_id, current, candle, candle_time
+                        )
                 except Exception:
                     logger.exception(
                         "Could not monitor signal %s for user %s.",
