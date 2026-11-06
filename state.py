@@ -10,6 +10,7 @@ from config import (
     STATE_FILE,
     TWELVE_DATA_DAILY_CREDIT_LIMIT,
     MIN_REQUEST_INTERVAL_SECONDS,
+    API_RESERVE_CREDITS,
 )
 
 _lock = threading.RLock()
@@ -106,7 +107,7 @@ def _refresh_daily_counter():
 # API BUDGET
 # ---------------------------------------------------------
 
-def reserve_api_request():
+def reserve_api_request(purpose='manual'):
     """
     Reserve one request against the local daily safety limit.
 
@@ -119,6 +120,15 @@ def reserve_api_request():
 
         limit = int(TWELVE_DATA_DAILY_CREDIT_LIMIT)
         used = int(_state.get("api_requests", 0))
+
+        purpose = str(purpose).lower()
+        if purpose == "auto":
+            automatic_limit = max(0, limit - int(API_RESERVE_CREDITS))
+            if used >= automatic_limit:
+                return False, (
+                    "Automatic scanner paused to protect the reserved "
+                    "daily API allowance for manual analysis and monitoring."
+                )
 
         if used >= limit:
             return False, (
