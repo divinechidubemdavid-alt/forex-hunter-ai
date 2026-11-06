@@ -18,7 +18,7 @@ WAT = ZoneInfo("Africa/Lagos")
 
 SCAN_TIMEFRAME = "15m"
 SCAN_INTERVAL_SECONDS = 60
-MINIMUM_SCAN_INTERVAL_MINUTES = 15
+MINIMUM_SCAN_INTERVAL_MINUTES = 30
 
 GOLD = "XAU/USD"
 BITCOIN = "BTC/USD"
@@ -90,62 +90,40 @@ def _eligible_markets(now):
     return markets
 
 
-def _next_market(now):
+def _markets_for_cycle(now):
     """
-    Select the next market using persistent rotation.
+    Return every currently eligible market for this scan cycle.
 
-    Gold receives approximately half of available scan slots.
-    Other weekday slots rotate across the six forex pairs.
-    Bitcoin is scanned on weekends only.
+    Gold is checked first, then the six forex pairs in a rotating
+    order. BTC/USD is checked on weekends, when forex is closed.
+    No eligible market is skipped merely because another market
+    has priority.
     """
-
     eligible = _eligible_markets(now)
 
-    if not eligible:
-        return None
-
     if eligible == [BITCOIN]:
-        return BITCOIN
+        return [BITCOIN]
 
-    sequence = []
+    if not eligible:
+        return []
 
-    # Two Gold slots for every two non-Gold slots.
-    # This gives Gold approximately 50% of weekday scan slots.
-    sequence.extend([
-        GOLD,
-        "EUR/USD",
-        GOLD,
-        "GBP/USD",
-        GOLD,
-        "USD/JPY",
-        GOLD,
-        "AUD/USD",
-        GOLD,
-        "USD/CAD",
-        GOLD,
-        "USD/CHF",
-    ])
-
-    sequence = [
-        market for market in sequence
-        if market in eligible
-    ]
-
-    if not sequence:
-        return eligible[0]
-
+    forex_order = list(FOREX_MARKETS)
     position = int(
         state.get_scanner_state("market_rotation_position", 0)
     )
+    if forex_order:
+        offset = position % len(forex_order)
+        forex_order = forex_order[offset:] + forex_order[:offset]
+        state.set_scanner_state(
+            "market_rotation_position",
+            position + 1,
+        )
 
-    selected = sequence[position % len(sequence)]
-
-    state.set_scanner_state(
-        "market_rotation_position",
-        position + 1,
-    )
-
-    return selected
+    ordered = []
+    if GOLD in eligible:
+        ordered.append(GOLD)
+    ordered.extend(market for market in forex_order if market in eligible)
+    return ordered
 
 
 def _destinations():
@@ -373,26 +351,33 @@ async def auto_scan_loop(app):
             ) / 60
 
             if elapsed_minutes >= MINIMUM_SCAN_INTERVAL_MINUTES:
-                market = _next_market(now)
+                markets = _markets_for_cycle(now)
 
-                if market:
-                    # Record the slot before requesting data.
+                if markets:
+                    logger.info(
+                        "Starting 30-minute scan cycle for %d markets: %s",
+                        len(markets),
+                        ", ".join(markets),
+                    )
+
+                    # Scan every eligible market in this cycle. Each
+                    # confirmed signal is sent immediately after detection.
+                    for index, market in enumerate(markets):
+                        if index:
+                            # Respect Twelve Data's shared request cooldown.
+                            await asyncio.sleep(8)
+
+                        logger.info(
+                            "Scanning %s at %s WAT.",
+                            market,
+                            datetime.now(WAT).isoformat(),
+                        )
+                        await _scan_market(app, market)
+
                     state.set_scanner_state(
                         "last_scan_epoch",
-                        current_epoch,
+                        datetime.now(WAT).timestamp(),
                     )
-
-                    logger.info(
-                        "Adaptive scan selected %s at %s WAT.",
-                        market,
-                        now.isoformat(),
-                    )
-
-                    await _scan_market(
-                        app,
-                        market,
-                    )
-
                 else:
                     logger.info(
                         "No eligible market is currently open."
