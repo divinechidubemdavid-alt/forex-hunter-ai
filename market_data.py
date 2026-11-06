@@ -105,6 +105,7 @@ async def fetch_candles(
     symbol,
     outputsize=1500,
     interval="1min",
+    purpose="manual",
 ):
     """
     Fetch completed candles from Twelve Data.
@@ -146,7 +147,8 @@ async def fetch_candles(
             return cached["data"].copy()
 
     allowed, reason = await asyncio.to_thread(
-        state.reserve_api_request
+        state.reserve_api_request,
+        purpose,
     )
 
     if not allowed:

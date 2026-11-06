@@ -11,7 +11,7 @@ from market_data import fetch_candles, MarketDataError
 
 logger = logging.getLogger(__name__)
 
-MONITOR_INTERVAL_SECONDS = 300
+MONITOR_INTERVAL_SECONDS = 15 * 60
 PARTIAL_FRACTION = 1.0 / 3.0
 
 
@@ -51,15 +51,26 @@ def _targets(signal):
     return [_number(value) for value in values[:3]]
 
 
-def _realised_r(flags):
-    # Each target closes one-third of the original position.
+def _realised_r(flags, stop_hit=False):
+    """
+    Realised R for one-third exits at +1R, +2R and +3R.
+
+    An open position only records exits already achieved. The unclosed
+    fraction is charged -1R per fraction only when the stop is reached.
+    """
     earned = sum(
         (index + 1) * PARTIAL_FRACTION
         for index, hit in enumerate(flags)
         if hit
     )
-    remaining = 3 - sum(bool(hit) for hit in flags)
-    return earned - remaining * PARTIAL_FRACTION
+    if not stop_hit:
+        return earned
+
+    remaining_fraction = max(
+        0.0,
+        1.0 - sum(PARTIAL_FRACTION for hit in flags if hit),
+    )
+    return earned - remaining_fraction
 
 
 async def _notify(app, user_id, settings, notification_key, message):
@@ -179,7 +190,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         return
 
     if stop_hit:
-        realised = _realised_r(flags)
+        realised = _realised_r(flags, stop_hit=True)
         updates.update({
             "stop_loss_hit": True,
             "realised_r": realised,
@@ -188,7 +199,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         state.update_signal(signal_id, updates)
         state.add_signal_event(
             signal_id,
-            "STOP LOSS",
+            "STOP_LOSS",
             f"Stop loss reached. Realised result: {realised:+.2f}R.",
             {
                 "realised_r": realised,
@@ -197,7 +208,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         )
         state.complete_signal(
             signal_id,
-            "STOP LOSS",
+            "STOP_LOSS",
             f"Stop loss reached. Realised result: {realised:+.2f}R.",
         )
         await _notify(
@@ -286,18 +297,38 @@ async def _monitor_cycle(app):
                 MARKETS[symbol],
                 outputsize=100,
                 interval=timeframe,
+                purpose="monitor",
             )
             if frame is None or frame.empty:
                 continue
 
-            candle = frame.iloc[-1]
-            candle_time = frame.index[-1]
-
-            for user_id, signal in records:
+            for user_id, original_signal in records:
+                signal = original_signal
                 try:
-                    await _check_one_signal(
-                        app, user_id, signal, candle, candle_time
-                    )
+                    last_checked = _timestamp(signal.get("last_checked"))
+                    signal_time = _timestamp(signal.get("candle_time"))
+                    pending_candles = frame
+                    if last_checked is not None:
+                        pending_candles = pending_candles[
+                            pending_candles.index > last_checked
+                        ]
+                    if signal_time is not None:
+                        pending_candles = pending_candles[
+                            pending_candles.index > signal_time
+                        ]
+
+                    # Process every unseen closed candle, not only the latest
+                    # one. This prevents 1m/5m signals from skipping price
+                    # touches between 15-minute monitor cycles.
+                    for candle_time, candle in pending_candles.iterrows():
+                        current = state.get_signal(
+                            _signal_id(signal), user_id
+                        )
+                        if not current or current.get("status") != "TRACKING":
+                            break
+                        await _check_one_signal(
+                            app, user_id, current, candle, candle_time
+                        )
                 except Exception:
                     logger.exception(
                         "Could not monitor signal %s for user %s.",

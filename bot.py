@@ -24,6 +24,11 @@ from config import MARKETS
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
+from report_charts import (
+    create_performance_report,
+    create_tracked_report,
+    create_history_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,57 +176,71 @@ async def show_market_scanner(update, context):
 
 
 async def show_strong_signals(update, context):
-    user_id = _user_id(update)
-    signals = state.get_signal_history(user_id, limit=100)
-
-    active = [
-        item for item in signals
-        if item.get("status") == "TRACKING"
-        and float(item.get("score", 0)) >= 70
-    ]
-
-    if not active:
+    opportunities = state.get_opportunities(limit=20)
+    now = datetime.now(WAT)
+    strong = []
+    for item in opportunities:
+        created = item.get("created_at")
+        try:
+            created_at = datetime.fromisoformat(
+                str(created).replace("Z", "+00:00")
+            ).astimezone(WAT)
+        except (TypeError, ValueError):
+            continue
+        if (
+            item.get("direction") in ("BUY", "SELL")
+            and float(item.get("score", 0)) >= 70
+            and (now - created_at).total_seconds() <= 24 * 60 * 60
+        ):
+            strong.append(item)
+    await update.message.reply_text(
+        "🔥 STRONG SIGNALS\n\nFresh automatic opportunities. "
+        "These are not tracked until you choose to track them.",
+        reply_markup=MENU,
+    )
+    if not strong:
         await update.message.reply_text(
-            "🔥 STRONG SIGNALS\n\n"
-            "You have no saved active strong signals yet.\n\n"
-            "Use Market Scanner to analyse a market.",
+            "No fresh qualifying opportunities are currently available.",
             reply_markup=MENU,
         )
         return
-
-    lines = ["🔥 YOUR ACTIVE STRONG SIGNALS\n"]
-
-    for signal in active[:15]:
-        lines.append(
-            f"#{signal.get('id')}  "
-            f"{signal.get('symbol', 'Unknown')} "
-            f"{signal.get('direction', signal.get('status', ''))}\n"
-            f"Score: {signal.get('score', 0)}/100\n"
-            f"Entry: {signal.get('entry', 'N/A')}\n"
-            f"Status: {signal.get('status')}\n"
+    for item in strong[:10]:
+        oid = item.get("id")
+        text = (
+            f"🔥 OPPORTUNITY #{oid}\n\n"
+            f"Market: {item.get('symbol', 'N/A')}\n"
+            f"Direction: {item.get('direction', 'N/A')}\n"
+            f"Timeframe: {item.get('timeframe', '15m')}\n"
+            f"Entry: {item.get('entry', 'N/A')}\n"
+            f"Stop loss: {item.get('stop_loss', 'N/A')}\n"
+            f"TP1: {item.get('tp1', 'N/A')}\n"
+            f"TP2: {item.get('tp2', 'N/A')}\n"
+            f"TP3: {item.get('tp3', 'N/A')}\n"
+            f"Quality: {item.get('score', 0)}/100\n"
+            f"Strategy: {item.get('strategy', 'N/A')}"
         )
-
-    await update.message.reply_text(
-        "\n".join(lines),
-        reply_markup=MENU,
-    )
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"optrack:{oid}")
+        ]])
+        await update.message.reply_text(text, reply_markup=keyboard)
 
 
 async def show_tracked_signals(update, context):
     user_id = _user_id(update)
     signals = state.get_tracked_signals(user_id)
-
+    report = create_tracked_report(signals)
+    await update.message.reply_photo(
+        photo=report,
+        caption="📌 MY TRACKED SIGNALS — visual overview",
+    )
     if not signals:
         await update.message.reply_text(
-            "📌 MY TRACKED SIGNALS\n\n"
             "You are not tracking any signals yet.",
             reply_markup=MENU,
         )
         return
-
     for signal in signals[:15]:
         signal_id = signal["id"]
-
         text = (
             f"📌 TRACKED SIGNAL #{signal_id}\n\n"
             f"Market: {signal.get('symbol', 'N/A')}\n"
@@ -232,95 +251,121 @@ async def show_tracked_signals(update, context):
             f"TP1: {signal.get('tp1', 'N/A')}\n"
             f"TP2: {signal.get('tp2', 'N/A')}\n"
             f"TP3: {signal.get('tp3', 'N/A')}\n"
-            f"Score: {signal.get('score', 0)}/100"
+            f"Realised R: {signal.get('realised_r', 0)}\n"
+            f"Status: {signal.get('status', 'N/A')}"
         )
-
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "Stop tracking",
-                    callback_data=f"stop:{signal_id}",
-                )
-            ]
-        ])
-
-        await update.message.reply_text(
-            text,
-            reply_markup=keyboard,
-        )
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("Stop tracking", callback_data=f"stop:{signal_id}")
+        ]])
+        await update.message.reply_text(text, reply_markup=keyboard)
 
 
 def _performance_summary(signals):
-    completed = [
-        item for item in signals
-        if item.get("status") in {
-            "TP3",
-            "STOP_LOSS",
-            "INVALIDATED",
-            "AMBIGUOUS",
-        }
-    ]
-
-    wins = [
-        item for item in completed
-        if item.get("status") == "TP3"
-    ]
-
-    losses = [
-        item for item in completed
-        if item.get("status") == "STOP_LOSS"
-    ]
-
-    count = len(wins) + len(losses)
-    win_rate = (len(wins) / count * 100) if count else 0
-
+    signals = list(signals or [])
+    completed = [s for s in signals if s.get("status") in {
+        "TP3", "STOP_LOSS", "INVALIDATED", "AMBIGUOUS", "MANUALLY_STOPPED"
+    }]
+    eligible = [s for s in signals if s.get("status") in {"TP3", "STOP_LOSS"}]
+    wins = sum(s.get("status") == "TP3" for s in eligible)
+    losses = sum(s.get("status") == "STOP_LOSS" for s in eligible)
+    win_rate = wins / len(eligible) * 100 if eligible else 0
+    total_r = sum(float(s.get("realised_r", 0) or 0) for s in signals
+                  if s.get("status") not in {"MANUALLY_STOPPED", "INVALIDATED", "AMBIGUOUS"})
+    tp = [sum(bool(s.get(f"tp{i}_hit")) for s in signals) for i in (1, 2, 3)]
     return (
-        f"📊 PERFORMANCE CENTRE\n\n"
-        f"Saved signals: {len(signals)}\n"
-        f"Completed outcomes: {len(completed)}\n"
-        f"TP3 completions: {len(wins)}\n"
-        f"Stop-loss completions: {len(losses)}\n"
-        f"Win rate of TP3 vs SL: {win_rate:.1f}%\n\n"
-        "Manually stopped, invalidated and ambiguous "
-        "signals are not counted as wins or losses.\n"
-        "This report uses saved bot records, not broker account history."
+        "📊 PERFORMANCE CENTRE\n\n"
+        f"Generated/tracked: {len(signals)}\n"
+        f"Completed: {len(completed)}\n"
+        f"Wins: {wins}  |  Losses: {losses}\n"
+        f"Win rate (TP3 vs SL): {win_rate:.1f}%\n"
+        f"TP achievements: TP1 {tp[0]} | TP2 {tp[1]} | TP3 {tp[2]}\n"
+        f"Cumulative realised R: {total_r:+.2f}R\n\n"
+        "Manually stopped, invalidated and ambiguous signals are excluded "
+        "from win/loss statistics. This is signal analytics, not broker P/L."
     )
 
 
-async def show_performance(update, context):
-    signals = state.get_signal_history(_user_id(update), limit=10000)
+def _performance_period(signals, period):
+    now = datetime.now(WAT)
+    if period == "day":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        label = "Today"
+    elif period == "week":
+        start = (now - __import__("datetime").timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        label = "This week"
+    elif period == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        label = "This month"
+    else:
+        return list(signals), "All time"
 
-    await update.message.reply_text(
+    filtered = []
+    for signal in signals:
+        try:
+            created = datetime.fromisoformat(
+                str(signal.get("created_at")).replace("Z", "+00:00")
+            ).astimezone(WAT)
+        except (TypeError, ValueError):
+            continue
+        if created >= start:
+            filtered.append(signal)
+    return filtered, label
+
+
+def _performance_period_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Today", callback_data="perf:day"),
+            InlineKeyboardButton("This week", callback_data="perf:week"),
+        ],
+        [
+            InlineKeyboardButton("This month", callback_data="perf:month"),
+            InlineKeyboardButton("All time", callback_data="perf:all"),
+        ],
+    ])
+
+
+async def _send_performance(chat, user_id, period):
+    all_signals = state.get_signal_history(user_id, limit=10000)
+    signals, label = _performance_period(all_signals, period)
+    report = create_performance_report(signals, period_label=label)
+    await chat.send_photo(
+        photo=report,
+        caption=f"📊 PERFORMANCE CENTRE — {label}",
+        reply_markup=_performance_period_keyboard(),
+    )
+    await chat.send_message(
         _performance_summary(signals),
         reply_markup=MENU,
     )
 
 
+async def show_performance(update, context):
+    await _send_performance(update.effective_chat, _user_id(update), "all")
+
+
 async def show_history(update, context):
-    signals = state.get_signal_history(_user_id(update), limit=20)
-
-    if not signals:
-        await update.message.reply_text(
-            "📚 SIGNAL HISTORY\n\nNo saved signals yet.",
-            reply_markup=MENU,
-        )
-        return
-
-    lines = ["📚 RECENT SIGNAL HISTORY\n"]
-
-    for signal in signals:
-        lines.append(
-            f"#{signal.get('id')} "
-            f"{signal.get('symbol', 'N/A')} "
-            f"{signal.get('direction', 'N/A')}\n"
-            f"Status: {signal.get('status', 'N/A')}\n"
-            f"Score: {signal.get('score', 0)}/100\n"
-        )
-
-    await update.message.reply_text(
-        "\n".join(lines),
-        reply_markup=MENU,
+    signals = state.get_signal_history(_user_id(update), limit=30)
+    report = create_history_report(signals)
+    await update.message.reply_photo(
+        photo=report,
+        caption="📚 SIGNAL HISTORY — visual history report",
     )
+    if not signals:
+        await update.message.reply_text("No saved signals yet.", reply_markup=MENU)
+        return
+    lines = ["📚 RECENT SIGNAL HISTORY\n"]
+    for signal in signals[:20]:
+        lines.append(
+            f"#{signal.get('id')} {signal.get('symbol', 'N/A')} "
+            f"{signal.get('direction', 'N/A')}\n"
+            f"Status: {signal.get('status', 'N/A')} | "
+            f"Score: {signal.get('score', 0)}/100 | "
+            f"Realised R: {signal.get('realised_r', 0)}"
+        )
+    await update.message.reply_text("\n".join(lines), reply_markup=MENU)
 
 
 async def show_settings(update, context):
@@ -337,8 +382,8 @@ async def show_settings(update, context):
         f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\n\n"
         "API safety counter:\n"
         f"{usage['used']} / {usage['limit']} requests recorded today\n"
-        f"Remaining local allowance: {usage['remaining']}\n\n"
-        "The API counter is a local safety measure, not a live "
+        f"Remaining local request allowance: {usage['remaining']}\n\n"
+        "The API counter counts local requests; it is not a live "
         "Twelve Data credit statement."
     )
 
@@ -411,34 +456,27 @@ async def analyse_market(update, context, symbol, timeframe):
             take_profits=result.get("take_profits"),
         )
 
-        if float(result.get("score", 0)) >= 70:
-            signal_id = (
-                f"manual-{user_id}-"
-                f"{int(datetime.now().timestamp())}"
+        signal_id = (
+            f"manual-{user_id}-"
+            f"{int(datetime.now().timestamp())}"
+        )
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                "📌 TRACK THIS SIGNAL",
+                callback_data=f"track:{signal_id}",
             )
-
-            keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "📌 TRACK THIS SIGNAL",
-                        callback_data=f"track:{signal_id}",
-                    )
-                ]
-            ])
-
-            context.user_data[signal_id] = {
-                "symbol": symbol,
-                "direction": result["status"],
-                "timeframe": timeframe,
-                "entry": result.get("entry"),
-                "stop_loss": result.get("stop_loss"),
-                "take_profits": result.get("take_profits", []),
-                "score": result.get("score", 0),
-                "strategy": result.get("strategy", ""),
-                "candle_time": str(frame.index[-1]),
-            }
-        else:
-            keyboard = None
+        ]])
+        context.user_data[signal_id] = {
+            "symbol": symbol,
+            "direction": result["status"],
+            "timeframe": timeframe,
+            "entry": result.get("entry"),
+            "stop_loss": result.get("stop_loss"),
+            "take_profits": result.get("take_profits", []),
+            "score": result.get("score", 0),
+            "strategy": result.get("strategy", ""),
+            "candle_time": str(frame.index[-1]),
+        }
 
         chart.seek(0)
 
@@ -497,6 +535,44 @@ async def handle_callback(update, context):
         )
         return
 
+    if data.startswith("perf:"):
+        period = data.split(":", 1)[1]
+        if period not in {"day", "week", "month", "all"}:
+            return
+        await _send_performance(query.message.chat, user_id, period)
+        return
+
+    if data.startswith("optrack:"):
+        opportunity_id = data.split(":", 1)[1]
+        opportunity = state.get_opportunity(opportunity_id)
+        if not opportunity:
+            await query.edit_message_text("This opportunity is no longer available.")
+            return
+        if opportunity.get("direction") not in ("BUY", "SELL"):
+            await query.edit_message_text("This opportunity is not trackable.")
+            return
+        targets = opportunity.get("take_profits") or []
+        record = state.add_signal(user_id, {
+            "symbol": opportunity.get("symbol"),
+            "direction": opportunity.get("direction"),
+            "timeframe": opportunity.get("timeframe", "15m"),
+            "entry": opportunity.get("entry"),
+            "stop_loss": opportunity.get("stop_loss"),
+            "tp1": opportunity.get("tp1") or (targets[0] if len(targets) > 0 else None),
+            "tp2": opportunity.get("tp2") or (targets[1] if len(targets) > 1 else None),
+            "tp3": opportunity.get("tp3") or (targets[2] if len(targets) > 2 else None),
+            "take_profits": targets,
+            "score": opportunity.get("score", 0),
+            "strategy": opportunity.get("strategy", ""),
+            "candle_time": opportunity.get("candle_time"),
+            "higher_timeframe": opportunity.get("higher_timeframe"),
+        })
+        await query.edit_message_text(
+            f"✅ Opportunity saved as tracked signal #{record['id']}. "
+            "Automatic monitoring will now follow this signal."
+        )
+        return
+
     if data.startswith("track:"):
         signal_id = data.split(":", 1)[1]
 
@@ -535,8 +611,7 @@ async def handle_callback(update, context):
             f"✅ SIGNAL #{record['id']} SAVED\n\n"
             f"{record['symbol']} {record['direction']}\n"
             "It has been added to your tracked signals.\n\n"
-            "Note: automatic milestone monitoring is connected "
-            "in the next integration stage."
+            "Automatic milestone monitoring is active for this signal."
         )
         return
 

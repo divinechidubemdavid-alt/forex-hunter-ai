@@ -60,8 +60,8 @@ PARTIAL_EXIT_FRACTIONS = (1 / 3, 1 / 3, 1 / 3)
 # This is a local ceiling, not a claim about provider credit pricing.
 TWELVE_DATA_DAILY_CREDIT_LIMIT = 800
 
-# Reserve part of the daily allowance for tracking and essential functions.
-API_RESERVE_CREDITS = 100
+# Reserve 100 local request slots for manual analysis and monitoring.
+API_RESERVE_REQUESTS = 100
 
 # Market-data settings.
 CACHE_TTL_SECONDS = 60

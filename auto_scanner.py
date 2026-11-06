@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import state
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from signal_monitor import monitor_signals_loop
 from config import MARKETS, TELEGRAM_CHANNEL_ID
 from market_data import fetch_candles, MarketDataError
@@ -179,30 +180,10 @@ def _signal_key(symbol, result):
 
 
 async def _send_signal(app, symbol, result):
+    """Publish an opportunity without silently adding it to user tracking."""
     message = format_signal(symbol, result)
-    chart = None
-
-    try:
-        chart = create_market_chart(
-            result.get("candles"), symbol, SCAN_TIMEFRAME,
-            entry=result.get("entry"),
-            stop_loss=result.get("stop_loss"),
-            take_profits=result.get("take_profits"),
-        )
-    except Exception:
-        logger.exception("Could not create chart for %s.", symbol)
-
-    try:
-        user_ids = state.get_users()
-    except Exception:
-        logger.exception("Could not load registered users.")
-        user_ids = []
     raw_targets = result.get("take_profits") or []
-    if isinstance(raw_targets, (list, tuple)):
-        targets = list(raw_targets)
-    else:
-        targets = [raw_targets]
-
+    targets = list(raw_targets) if isinstance(raw_targets, (list, tuple)) else [raw_targets]
     signal_record = {
         "symbol": symbol,
         "direction": result.get("status") or result.get("direction"),
@@ -218,32 +199,82 @@ async def _send_signal(app, symbol, result):
         "candle_time": str(result.get("candle_time") or "unknown"),
         "higher_timeframe": result.get("higher_timeframe"),
     }
+    opportunity_key = _signal_key(symbol, result)
+    opportunity = state.add_opportunity(opportunity_key, signal_record)
+
+    chart = None
+    try:
+        chart = create_market_chart(
+            result.get("candles"), symbol, SCAN_TIMEFRAME,
+            entry=result.get("entry"),
+            stop_loss=result.get("stop_loss"),
+            take_profits=targets,
+        )
+    except Exception:
+        logger.exception("Could not create chart for %s.", symbol)
+
+    try:
+        user_ids = state.get_users()
+    except Exception:
+        logger.exception("Could not load registered users.")
+        user_ids = []
+
+    delivered = 0
     for user_id in user_ids:
+        delivery_key = f"{opportunity_key}:user:{user_id}"
+        if state.get_last_alert(delivery_key):
+            continue
         try:
-            state.add_signal(user_id, signal_record)
-            logger.info("Saved signal for user %s: %s", user_id, symbol)
-        except Exception:
-            logger.exception("Could not save signal for user %s.", user_id)
-
-    destinations = _destinations()
-    if not destinations:
-        logger.info("Signal found for %s, but no recipients.", symbol)
-        return
-
-    for destination in destinations:
-        try:
-            chat_id = int(destination)
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "📌 TRACK THIS SIGNAL",
+                    callback_data=f"optrack:{opportunity['id']}",
+                )
+            ]])
             if chart is not None:
                 chart.seek(0)
                 await app.bot.send_photo(
-                    chat_id=chat_id, photo=chart, caption=message
+                    chat_id=int(user_id), photo=chart,
+                    caption=message, reply_markup=keyboard,
                 )
             else:
                 await app.bot.send_message(
-                    chat_id=chat_id, text=message
+                    chat_id=int(user_id), text=message,
+                    reply_markup=keyboard,
                 )
+            state.set_last_alert(delivery_key, "sent")
+            delivered += 1
         except Exception:
-            logger.exception("Could not send signal to %s.", destination)
+            logger.exception("Could not send opportunity to user %s.", user_id)
+
+    if TELEGRAM_CHANNEL_ID:
+        channel_delivery_key = (
+            f"{opportunity_key}:channel:{TELEGRAM_CHANNEL_ID}"
+        )
+        if not state.get_last_alert(channel_delivery_key):
+            try:
+                if chart is not None:
+                    chart.seek(0)
+                    await app.bot.send_photo(
+                        chat_id=int(TELEGRAM_CHANNEL_ID),
+                        photo=chart, caption=message,
+                    )
+                else:
+                    await app.bot.send_message(
+                        chat_id=int(TELEGRAM_CHANNEL_ID), text=message,
+                    )
+                state.set_last_alert(channel_delivery_key, "sent")
+                delivered += 1
+            except Exception:
+                logger.exception("Could not publish opportunity to channel.")
+
+    if delivered == 0:
+        logger.info(
+            "No new delivery for %s; previously delivered recipients are skipped "
+            "and failed destinations remain eligible for retry.",
+            symbol,
+        )
+    return delivered
 
 
 async def _scan_market(app, symbol):
@@ -259,6 +290,7 @@ async def _scan_market(app, symbol):
             MARKETS[symbol],
             outputsize=500,
             interval="15m",
+            purpose="auto",
         )
 
         result = analyze(
@@ -286,22 +318,12 @@ async def _scan_market(app, symbol):
 
         key = _signal_key(symbol, result)
 
-        if state.get_last_alert(key):
+        delivered = await _send_signal(app, symbol, result)
+        if not delivered:
             logger.info(
-                "Duplicate signal suppressed: %s",
+                "No new delivery confirmed for %s; failed destinations remain eligible for retry.",
                 key,
             )
-            return
-
-        # Save before sending to reduce duplicate notifications
-        # if the application restarts during delivery.
-        state.set_last_alert(key, "sent")
-
-        await _send_signal(
-            app,
-            symbol,
-            result,
-        )
 
     except MarketDataError as exc:
         logger.warning(
