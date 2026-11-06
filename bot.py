@@ -215,18 +215,26 @@ async def _refresh_strong_signal_snapshot():
         saved_time = None
 
     if saved_time and (now - saved_time).total_seconds() < 15 * 60:
-        return [
-            item for item in (
-                state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
-            )
-            if item
-        ], saved_time, True
+        return (
+            [
+                item for item in (
+                    state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
+                )
+                if item
+            ],
+            saved_time,
+            True,
+            int(saved.get("markets_checked", 0)),
+            list(saved.get("errors", [])),
+        )
 
     strong = []
     errors = []
+    markets_checked = 0
     for symbol in MARKETS:
         try:
             frame = await _fetch_strong_market_frame(symbol)
+            markets_checked += 1
             result = analyze(frame, "15m")
             if result.get("status") not in ("BUY", "SELL"):
                 continue
@@ -271,9 +279,10 @@ async def _refresh_strong_signal_snapshot():
     state.set_scanner_state("strong_signals_snapshot", {
         "updated_at": snapshot_time.isoformat(),
         "opportunity_ids": [str(item["id"]) for item in strong],
+        "markets_checked": markets_checked,
         "errors": errors,
     })
-    return strong, snapshot_time, False
+    return strong, snapshot_time, False, markets_checked, errors
 
 
 async def show_strong_signals(update, context):
@@ -283,7 +292,13 @@ async def show_strong_signals(update, context):
         "the latest completed 15-minute candles. This may take a little while."
     )
 
-    opportunities, refreshed_at, from_cache = await _refresh_strong_signal_snapshot()
+    (
+        opportunities,
+        refreshed_at,
+        from_cache,
+        markets_checked,
+        market_errors,
+    ) = await _refresh_strong_signal_snapshot()
 
     # Also hide opportunities tracked before per-user claims were introduced.
     tracked_fingerprints = set()
@@ -322,12 +337,18 @@ async def show_strong_signals(update, context):
     await update.message.reply_text(
         f"🔥 STRONG SIGNALS — {label}\n"
         f"Last scan: {refreshed_at.strftime('%d %b %Y, %H:%M:%S')} WAT\n"
-        f"Markets checked: {len(MARKETS)}\n"
+        f"Markets checked successfully: {markets_checked}/{len(MARKETS)}\n"
         f"Qualifying fresh setups: {len(strong)}\n\n"
         "Only current qualifying opportunities are shown. "
         "Track a signal to monitor its TP/SL progress.",
         reply_markup=MENU,
     )
+    if market_errors:
+        await update.message.reply_text(
+            "⚠️ Some markets could not be checked:\n"
+            + "\n".join(f"• {error}" for error in market_errors),
+            reply_markup=MENU,
+        )
     if not strong:
         await update.message.reply_text(
             "No fresh strong opportunities are available right now. "
