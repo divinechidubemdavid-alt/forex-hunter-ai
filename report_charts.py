@@ -120,8 +120,12 @@ def create_tracked_report(signals):
                     fontsize=12, weight="bold", transform=ax.transAxes)
             ax.text(0.42, y, f"Entry {s.get('entry', '—')}   SL {s.get('stop_loss', '—')}",
                     color=TEXT, fontsize=9, transform=ax.transAxes)
+            progress = "  ".join(
+                f"TP{i} {'✓' if s.get(f'tp{i}_hit') else '○'}"
+                for i in (1, 2, 3)
+            )
             ax.text(0.02, y - 0.045,
-                    f"TP1 {s.get('tp1', '—')}  •  TP2 {s.get('tp2', '—')}  •  TP3 {s.get('tp3', '—')}  •  {s.get('timeframe', '—')}",
+                    f"{progress}  •  {s.get('timeframe', '—')}  •  {s.get('status', 'TRACKING')}",
                     color=MUTED, fontsize=9, transform=ax.transAxes)
             ax.plot([0.02, 0.98], [y - 0.065, y - 0.065],
                     color="#26332B", linewidth=0.7, transform=ax.transAxes)
