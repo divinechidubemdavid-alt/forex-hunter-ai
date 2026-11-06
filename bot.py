@@ -846,13 +846,17 @@ async def handle_callback(update, context):
             user_id,
         )
 
-        await query.edit_message_text(
+        message = (
             "Tracking stopped. The signal history is preserved. "
             "This is not recorded as a win or loss."
             if stopped
             else "This signal could not be stopped. "
                  "It may already be completed or belong to another user."
         )
+        if getattr(query.message, "photo", None):
+            await query.edit_message_caption(caption=message)
+        else:
+            await query.edit_message_text(text=message)
         return
 
     if data == "settings:timeframe":
