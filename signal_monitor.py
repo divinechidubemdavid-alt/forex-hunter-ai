@@ -294,11 +294,15 @@ async def _check_trend_warning(app, user_id, signal, frame):
     """Record and notify once per completed candle for each warning type."""
     signal_id = _signal_id(signal)
     warning = assess_trend_health(frame, signal.get("direction"))
+    previous_warning = signal.get("trend_warning_key")
     if not warning:
+        if previous_warning:
+            state.update_signal(signal_id, {"trend_warning_key": None})
         return
 
-    warning_key = f"{warning['type']}:{warning['candle_time']}"
-    if signal.get("trend_warning_key") == warning_key:
+    # One alert per continuous warning episode, not one alert per candle.
+    warning_key = warning["type"]
+    if previous_warning == warning_key:
         return
 
     state.update_signal(signal_id, {"trend_warning_key": warning_key})
