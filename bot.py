@@ -176,10 +176,16 @@ async def show_market_scanner(update, context):
 
 
 async def show_strong_signals(update, context):
-    opportunities = state.get_opportunities(limit=20)
+    user_id = _user_id(update)
+    opportunities = state.get_opportunities(limit=100)
     now = datetime.now(WAT)
     strong = []
     for item in opportunities:
+        claimed_by = item.get("claimed_by", [])
+        if not isinstance(claimed_by, list):
+            claimed_by = []
+        if str(user_id) in {str(value) for value in claimed_by}:
+            continue
         created = item.get("created_at")
         try:
             created_at = datetime.fromisoformat(
@@ -711,11 +717,21 @@ async def handle_callback(update, context):
         if not opportunity:
             await query.edit_message_text("This opportunity is no longer available.")
             return
+        claimed_by = opportunity.get("claimed_by", [])
+        if not isinstance(claimed_by, list):
+            claimed_by = []
+        if str(user_id) in {str(value) for value in claimed_by}:
+            await query.edit_message_text(
+                "You have already tracked this opportunity. "
+                "It has been removed from your Strong Signals list."
+            )
+            return
         if opportunity.get("direction") not in ("BUY", "SELL"):
             await query.edit_message_text("This opportunity is not trackable.")
             return
         targets = opportunity.get("take_profits") or []
         record = state.add_signal(user_id, {
+            "opportunity_id": str(opportunity_id),
             "symbol": opportunity.get("symbol"),
             "direction": opportunity.get("direction"),
             "timeframe": opportunity.get("timeframe", "15m"),
@@ -730,8 +746,10 @@ async def handle_callback(update, context):
             "candle_time": opportunity.get("candle_time"),
             "higher_timeframe": opportunity.get("higher_timeframe"),
         })
+        state.mark_opportunity_claimed(opportunity_id, user_id)
         message = (
             f"✅ Opportunity saved as tracked signal #{record['id']}. "
+            "It has been removed from your Strong Signals list. "
             "Automatic monitoring will now follow this signal."
         )
         if getattr(query.message, "photo", None):
