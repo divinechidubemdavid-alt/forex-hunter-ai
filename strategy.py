@@ -705,6 +705,71 @@ def analyze(frame, timeframe="15m"):
     return result
 
 
+
+def assess_trend_health(frame, direction):
+    """Return a concise warning when closed-candle evidence weakens a signal."""
+    direction = str(direction).upper()
+    if direction not in ("BUY", "SELL"):
+        return None
+
+    data = calculate_indicators(frame).dropna()
+    if len(data) < 5:
+        return None
+
+    last = data.iloc[-1]
+    previous = data.iloc[-2]
+    recent_adx = data["adx"].iloc[-4:]
+    adx_falling = bool(
+        len(recent_adx) == 4
+        and all(recent_adx.iloc[i] < recent_adx.iloc[i - 1]
+                for i in range(1, 4))
+    )
+    adx_weak = _safe_float(last["adx"]) < ADX_MINIMUM
+    ema_against = (
+        last["ema9"] < last["ema21"] if direction == "BUY"
+        else last["ema9"] > last["ema21"]
+    )
+    di_against = (
+        last["minus_di"] > last["plus_di"] if direction == "BUY"
+        else last["plus_di"] > last["minus_di"]
+    )
+    rsi_against = (
+        _safe_float(last["rsi"]) < 50 if direction == "BUY"
+        else _safe_float(last["rsi"]) > 50
+    )
+    crossed_against = (
+        previous["ema9"] >= previous["ema21"]
+        and last["ema9"] < last["ema21"]
+        if direction == "BUY"
+        else previous["ema9"] <= previous["ema21"]
+        and last["ema9"] > last["ema21"]
+    )
+
+    if crossed_against and di_against:
+        return {
+            "type": "TREND_REVERSAL_WARNING",
+            "message": (
+                f"Possible {direction.lower()} trend reversal: EMA alignment "
+                "has crossed against the signal and directional movement "
+                "confirms the opposing side. Review before making a decision."
+            ),
+            "candle_time": str(data.index[-1]),
+        }
+
+    weakening_votes = sum((adx_weak, adx_falling, ema_against, di_against, rsi_against))
+    if weakening_votes >= 3:
+        return {
+            "type": "TREND_WEAKENING",
+            "message": (
+                f"{direction} trend is weakening: ADX/momentum and directional "
+                "indicators show several signs of deterioration. This is a "
+                "warning, not confirmation that price will reverse."
+            ),
+            "candle_time": str(data.index[-1]),
+        }
+    return None
+
+
 def format_signal(symbol, result):
     """Format a readable Telegram analysis report."""
 
