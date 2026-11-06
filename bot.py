@@ -285,14 +285,65 @@ def _performance_summary(signals):
     )
 
 
-async def show_performance(update, context):
-    signals = state.get_signal_history(_user_id(update), limit=10000)
-    report = create_performance_report(signals)
-    await update.message.reply_photo(
+def _performance_period(signals, period):
+    now = datetime.now(WAT)
+    if period == "day":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        label = "Today"
+    elif period == "week":
+        start = (now - __import__("datetime").timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        label = "This week"
+    elif period == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        label = "This month"
+    else:
+        return list(signals), "All time"
+
+    filtered = []
+    for signal in signals:
+        try:
+            created = datetime.fromisoformat(
+                str(signal.get("created_at")).replace("Z", "+00:00")
+            ).astimezone(WAT)
+        except (TypeError, ValueError):
+            continue
+        if created >= start:
+            filtered.append(signal)
+    return filtered, label
+
+
+def _performance_period_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Today", callback_data="perf:day"),
+            InlineKeyboardButton("This week", callback_data="perf:week"),
+        ],
+        [
+            InlineKeyboardButton("This month", callback_data="perf:month"),
+            InlineKeyboardButton("All time", callback_data="perf:all"),
+        ],
+    ])
+
+
+async def _send_performance(chat, user_id, period):
+    all_signals = state.get_signal_history(user_id, limit=10000)
+    signals, label = _performance_period(all_signals, period)
+    report = create_performance_report(signals, period_label=label)
+    await chat.send_photo(
         photo=report,
-        caption="📊 PERFORMANCE CENTRE — visual performance dashboard",
+        caption=f"📊 PERFORMANCE CENTRE — {label}",
+        reply_markup=_performance_period_keyboard(),
     )
-    await update.message.reply_text(_performance_summary(signals), reply_markup=MENU)
+    await chat.send_message(
+        _performance_summary(signals),
+        reply_markup=MENU,
+    )
+
+
+async def show_performance(update, context):
+    await _send_performance(update.effective_chat, _user_id(update), "all")
 
 
 async def show_history(update, context):
@@ -482,6 +533,13 @@ async def handle_callback(update, context):
             parts[1],
             parts[2],
         )
+        return
+
+    if data.startswith("perf:"):
+        period = data.split(":", 1)[1]
+        if period not in {"day", "week", "month", "all"}:
+            return
+        await _send_performance(query.message.chat, user_id, period)
         return
 
     if data.startswith("optrack:"):
