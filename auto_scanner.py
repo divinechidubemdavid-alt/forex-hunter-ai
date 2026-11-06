@@ -242,32 +242,38 @@ async def _send_signal(app, symbol, result):
                     chat_id=int(user_id), text=message,
                     reply_markup=keyboard,
                 )
-            delivered += 1
             state.set_last_alert(delivery_key, "sent")
+            delivered += 1
         except Exception:
             logger.exception("Could not send opportunity to user %s.", user_id)
 
     if TELEGRAM_CHANNEL_ID:
-        channel_delivery_key = f"{opportunity_key}:channel:{TELEGRAM_CHANNEL_ID}"
+        channel_delivery_key = (
+            f"{opportunity_key}:channel:{TELEGRAM_CHANNEL_ID}"
+        )
         if not state.get_last_alert(channel_delivery_key):
             try:
-            if chart is not None:
-                chart.seek(0)
-                await app.bot.send_photo(
-                    chat_id=int(TELEGRAM_CHANNEL_ID),
-                    photo=chart, caption=message,
-                )
-            else:
-                await app.bot.send_message(
-                    chat_id=int(TELEGRAM_CHANNEL_ID), text=message,
-                )
-                delivered += 1
+                if chart is not None:
+                    chart.seek(0)
+                    await app.bot.send_photo(
+                        chat_id=int(TELEGRAM_CHANNEL_ID),
+                        photo=chart, caption=message,
+                    )
+                else:
+                    await app.bot.send_message(
+                        chat_id=int(TELEGRAM_CHANNEL_ID), text=message,
+                    )
                 state.set_last_alert(channel_delivery_key, "sent")
+                delivered += 1
             except Exception:
                 logger.exception("Could not publish opportunity to channel.")
 
     if delivered == 0:
-        logger.warning("Opportunity for %s saved, but no destination received it.", symbol)
+        logger.info(
+            "No new delivery for %s; previously delivered recipients are skipped "
+            "and failed destinations remain eligible for retry.",
+            symbol,
+        )
     return delivered
 
 
