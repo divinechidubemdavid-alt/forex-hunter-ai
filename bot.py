@@ -177,11 +177,22 @@ async def show_market_scanner(update, context):
 
 async def show_strong_signals(update, context):
     opportunities = state.get_opportunities(limit=20)
-    strong = [
-        item for item in opportunities
-        if item.get("direction") in ("BUY", "SELL")
-        and float(item.get("score", 0)) >= 70
-    ]
+    now = datetime.now(WAT)
+    strong = []
+    for item in opportunities:
+        created = item.get("created_at")
+        try:
+            created_at = datetime.fromisoformat(
+                str(created).replace("Z", "+00:00")
+            ).astimezone(WAT)
+        except (TypeError, ValueError):
+            continue
+        if (
+            item.get("direction") in ("BUY", "SELL")
+            and float(item.get("score", 0)) >= 70
+            and (now - created_at).total_seconds() <= 24 * 60 * 60
+        ):
+            strong.append(item)
     await update.message.reply_text(
         "🔥 STRONG SIGNALS\n\nFresh automatic opportunities. "
         "These are not tracked until you choose to track them.",
