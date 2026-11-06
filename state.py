@@ -439,6 +439,10 @@ def update_signal(signal_id, updates):
         "last_checked",
         "result_r",
         "realised_r",
+        "trend_warning_key",
+        "chart_chat_id",
+        "chart_message_id",
+        "chart_last_update",
     }
 
     with _lock:
