@@ -990,12 +990,12 @@ async def handle_callback(update, context):
         }
         mode_label = mode_labels.get(mode, "Silent Monitoring")
         text = (
-            "⚙️ PERSONAL SETTINGS\\n\\n"
-            f"Default timeframe: {timeframe}\\n"
-            f"Preferred markets: {', '.join(settings.get('markets', []))}\\n"
-            f"Risk preference: {settings.get('risk_percent', 1.0)}%\\n"
-            f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\\n"
-            f"Tracking notifications: {mode_label}\\n\\n"
+            "⚙️ PERSONAL SETTINGS\n\n"
+            f"Default timeframe: {timeframe}\n"
+            f"Preferred markets: {', '.join(settings.get('markets', []))}\n"
+            f"Risk preference: {settings.get('risk_percent', 1.0)}%\n"
+            f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\n"
+            f"Tracking notifications: {mode_label}\n\n"
             "Choose a setting below."
         )
         keyboard = InlineKeyboardMarkup([
