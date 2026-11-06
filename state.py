@@ -439,6 +439,10 @@ def update_signal(signal_id, updates):
         "last_checked",
         "result_r",
         "realised_r",
+        "trend_warning_key",
+        "chart_chat_id",
+        "chart_message_id",
+        "chart_last_update",
     }
 
     with _lock:
@@ -592,6 +596,31 @@ def get_opportunity(opportunity_id):
     with _lock:
         item = _state["opportunities"].get(str(opportunity_id))
         return dict(item) if item else None
+
+
+def mark_opportunity_claimed(opportunity_id, user_id):
+    """Hide a scanner opportunity from this user after they track it.
+
+    Claims are per-user because the automatic opportunity feed is shared;
+    one user's decision must not hide an opportunity from every other user.
+    """
+    with _lock:
+        item = _state["opportunities"].get(str(opportunity_id))
+        if not item:
+            return False
+
+        claimed_by = item.get("claimed_by", [])
+        if not isinstance(claimed_by, list):
+            claimed_by = []
+
+        user_key = str(user_id)
+        if user_key not in claimed_by:
+            claimed_by.append(user_key)
+
+        item["claimed_by"] = claimed_by
+        item["updated_at"] = _now()
+        _save()
+        return True
 
 
 # ---------------------------------------------------------

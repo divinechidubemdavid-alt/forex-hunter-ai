@@ -1,5 +1,7 @@
 
+import asyncio
 import logging
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -175,39 +177,190 @@ async def show_market_scanner(update, context):
     )
 
 
-async def show_strong_signals(update, context):
-    opportunities = state.get_opportunities(limit=20)
+async def _fetch_strong_market_frame(symbol):
+    """Wait for the shared provider cooldown rather than skipping later markets."""
+    for attempt in range(12):
+        try:
+            return await fetch_candles(
+                MARKETS[symbol],
+                outputsize=500,
+                interval="15m",
+                purpose="auto",
+            )
+        except MarketDataError as exc:
+            match = re.search(
+                r"API cooldown active\. Try again in ([0-9.]+) seconds",
+                str(exc),
+            )
+            if not match or attempt == 11:
+                raise
+            await asyncio.sleep(float(match.group(1)) + 0.2)
+    raise MarketDataError("Could not obtain market data after cooldown retries.")
+
+
+async def _refresh_strong_signal_snapshot():
+    """Refresh all configured markets and return every currently strong setup.
+
+    A shared 15-minute snapshot matches the 15-minute closed-candle strategy
+    and prevents repeated button taps from consuming more API requests. Market data itself is cached by market_data.
+    """
     now = datetime.now(WAT)
+    saved = state.get_scanner_state("strong_signals_snapshot", {}) or {}
+    saved_at = saved.get("updated_at")
+    try:
+        saved_time = datetime.fromisoformat(
+            str(saved_at).replace("Z", "+00:00")
+        ).astimezone(WAT)
+    except (TypeError, ValueError):
+        saved_time = None
+
+    if saved_time and (now - saved_time).total_seconds() < 15 * 60:
+        return (
+            [
+                item for item in (
+                    state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
+                )
+                if item
+            ],
+            saved_time,
+            True,
+            int(saved.get("markets_checked", 0)),
+            list(saved.get("errors", [])),
+        )
+
+    strong = []
+    errors = []
+    markets_checked = 0
+    for symbol in MARKETS:
+        try:
+            frame = await _fetch_strong_market_frame(symbol)
+            markets_checked += 1
+            result = analyze(frame, "15m")
+            if result.get("status") not in ("BUY", "SELL"):
+                continue
+            if float(result.get("score", 0)) < 70:
+                continue
+
+            result["symbol"] = symbol
+            result["timeframe"] = "15m"
+            result["candle_time"] = str(
+                result.get("candle_time") or frame.index[-1]
+            )
+            raw_targets = result.get("take_profits") or []
+            targets = list(raw_targets) if isinstance(raw_targets, (list, tuple)) else [raw_targets]
+            key = (
+                f"adaptive-signal:{symbol}:15m:"
+                f"{result['status']}:{result['candle_time']}"
+            )
+            opportunity = state.add_opportunity(key, {
+                "symbol": symbol,
+                "direction": result["status"],
+                "timeframe": "15m",
+                "entry": result.get("entry"),
+                "stop_loss": result.get("stop_loss"),
+                "tp1": targets[0] if len(targets) > 0 else None,
+                "tp2": targets[1] if len(targets) > 1 else None,
+                "tp3": targets[2] if len(targets) > 2 else None,
+                "take_profits": targets,
+                "score": result.get("score", 0),
+                "strategy": result.get("strategy", ""),
+                "candle_time": result["candle_time"],
+                "higher_timeframe": result.get("higher_timeframe"),
+            })
+            strong.append(opportunity)
+        except MarketDataError as exc:
+            errors.append(f"{symbol}: {exc}")
+            logger.warning("Strong Signals refresh unavailable for %s: %s", symbol, exc)
+        except Exception:
+            errors.append(f"{symbol}: analysis error")
+            logger.exception("Strong Signals analysis failed for %s.", symbol)
+
+    snapshot_time = datetime.now(WAT)
+    state.set_scanner_state("strong_signals_snapshot", {
+        "updated_at": snapshot_time.isoformat(),
+        "opportunity_ids": [str(item["id"]) for item in strong],
+        "markets_checked": markets_checked,
+        "errors": errors,
+    })
+    return strong, snapshot_time, False, markets_checked, errors
+
+
+async def show_strong_signals(update, context):
+    user_id = _user_id(update)
+    await update.message.reply_text(
+        "🔄 Refreshing Strong Signals across all configured markets using "
+        "the latest completed 15-minute candles. This may take a little while."
+    )
+
+    (
+        opportunities,
+        refreshed_at,
+        from_cache,
+        markets_checked,
+        market_errors,
+    ) = await _refresh_strong_signal_snapshot()
+
+    # Also hide opportunities tracked before per-user claims were introduced.
+    tracked_fingerprints = set()
+    for tracked in state.get_signal_history(user_id, limit=500):
+        tracked_fingerprints.add((
+            str(tracked.get("symbol")),
+            str(tracked.get("direction")),
+            str(tracked.get("timeframe", "15m")),
+            str(tracked.get("entry")),
+            str(tracked.get("candle_time")),
+        ))
+
     strong = []
     for item in opportunities:
-        created = item.get("created_at")
-        try:
-            created_at = datetime.fromisoformat(
-                str(created).replace("Z", "+00:00")
-            ).astimezone(WAT)
-        except (TypeError, ValueError):
+        claimed_by = item.get("claimed_by", [])
+        if not isinstance(claimed_by, list):
+            claimed_by = []
+        if str(user_id) in {str(value) for value in claimed_by}:
+            continue
+        fingerprint = (
+            str(item.get("symbol")),
+            str(item.get("direction")),
+            str(item.get("timeframe", "15m")),
+            str(item.get("entry")),
+            str(item.get("candle_time")),
+        )
+        if fingerprint in tracked_fingerprints:
             continue
         if (
             item.get("direction") in ("BUY", "SELL")
             and float(item.get("score", 0)) >= 70
-            and (now - created_at).total_seconds() <= 24 * 60 * 60
         ):
             strong.append(item)
+
+    label = "cached scan" if from_cache else "fresh scan"
     await update.message.reply_text(
-        "🔥 STRONG SIGNALS\n\nFresh automatic opportunities. "
-        "These are not tracked until you choose to track them.",
+        f"🔥 STRONG SIGNALS — {label}\n"
+        f"Last scan: {refreshed_at.strftime('%d %b %Y, %H:%M:%S')} WAT\n"
+        f"Markets checked successfully: {markets_checked}/{len(MARKETS)}\n"
+        f"Qualifying fresh setups: {len(strong)}\n\n"
+        "Only current qualifying opportunities are shown. "
+        "Track a signal to monitor its TP/SL progress.",
         reply_markup=MENU,
     )
+    if market_errors:
+        await update.message.reply_text(
+            "⚠️ Some markets could not be checked:\n"
+            + "\n".join(f"• {error}" for error in market_errors),
+            reply_markup=MENU,
+        )
     if not strong:
         await update.message.reply_text(
-            "No fresh qualifying opportunities are currently available.",
+            "No fresh strong opportunities are available right now. "
+            "The bot will not recycle old entries.",
             reply_markup=MENU,
         )
         return
-    for item in strong[:10]:
+
+    for item in strong:
         oid = item.get("id")
-        text = (
-            f"🔥 OPPORTUNITY #{oid}\n\n"
+        message = (
+            f"🔥 STRONG OPPORTUNITY #{oid}\n\n"
             f"Market: {item.get('symbol', 'N/A')}\n"
             f"Direction: {item.get('direction', 'N/A')}\n"
             f"Timeframe: {item.get('timeframe', '15m')}\n"
@@ -222,7 +375,7 @@ async def show_strong_signals(update, context):
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"optrack:{oid}")
         ]])
-        await update.message.reply_text(text, reply_markup=keyboard)
+        await update.message.reply_text(message, reply_markup=keyboard)
 
 
 def _signal_progress(signal):
@@ -384,11 +537,16 @@ async def _show_signal_detail(chat, user_id, signal_id):
             stop_loss=signal.get("stop_loss"),
             take_profits=targets,
         )
-        await chat.send_photo(
+        sent_message = await chat.send_photo(
             photo=chart,
             caption=caption,
             reply_markup=keyboard,
         )
+        state.update_signal(signal_id, {
+            "chart_chat_id": chat.id,
+            "chart_message_id": sent_message.message_id,
+            "chart_last_update": datetime.now(WAT).isoformat(),
+        })
     except (MarketDataError, ValueError, KeyError) as exc:
         await chat.send_message(
             caption
@@ -516,7 +674,6 @@ async def show_settings(update, context):
     user_id = _user_id(update)
     settings = state.get_user_settings(user_id)
     timeframe = state.get_timeframe(user_id)
-    usage = state.get_api_usage()
     mode = settings.get("tracking_notification_mode", "silent")
     mode_labels = {
         "silent": "Silent Monitoring",
@@ -532,14 +689,16 @@ async def show_settings(update, context):
         f"Risk preference: {settings.get('risk_percent', 1.0)}%\n"
         f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\n"
         f"Tracking notifications: {mode_label}\n\n"
-        "API safety counter:\n"
-        f"{usage['used']} / {usage['limit']} requests recorded today\n"
-        f"Remaining local request allowance: {usage['remaining']}\n\n"
-        "The API counter counts local requests; it is not a live "
-        "Twelve Data credit statement."
+        "Choose a setting below."
     )
 
     keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "📡 API Usage",
+                callback_data="settings:api_usage",
+            )
+        ],
         [
             InlineKeyboardButton(
                 "Change default timeframe",
@@ -564,6 +723,36 @@ async def show_settings(update, context):
         text,
         reply_markup=keyboard,
     )
+
+
+async def show_api_usage(chat):
+    usage = state.get_api_usage()
+    used = usage["used"]
+    limit = usage["limit"]
+    remaining = usage["remaining"]
+    percent = (used / limit * 100) if limit else 0
+
+    text = (
+        "📡 API USAGE\n\n"
+        f"Date: {usage['date']} (Nigeria time)\n"
+        f"Requests recorded today: {used:,} / {limit:,}\n"
+        f"Remaining local allowance: {remaining:,}\n"
+        f"Usage: {percent:.1f}%\n\n"
+        "Safety notes:\n"
+        "• The local daily ceiling is 800 requests.\n"
+        "• 100 request slots are reserved for manual analysis and monitoring.\n"
+        "• Automatic scanning stops at its protected allowance.\n\n"
+        "This counter records requests made by the bot. It is not a live "
+        "Twelve Data credit or billing statement."
+    )
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "⬅️ Back to Settings",
+            callback_data="settings:back",
+        )
+    ]])
+    await chat.send_message(text, reply_markup=keyboard)
 
 
 async def analyse_market(update, context, symbol, timeframe):
@@ -706,11 +895,21 @@ async def handle_callback(update, context):
         if not opportunity:
             await query.edit_message_text("This opportunity is no longer available.")
             return
+        claimed_by = opportunity.get("claimed_by", [])
+        if not isinstance(claimed_by, list):
+            claimed_by = []
+        if str(user_id) in {str(value) for value in claimed_by}:
+            await query.edit_message_text(
+                "You have already tracked this opportunity. "
+                "It has been removed from your Strong Signals list."
+            )
+            return
         if opportunity.get("direction") not in ("BUY", "SELL"):
             await query.edit_message_text("This opportunity is not trackable.")
             return
         targets = opportunity.get("take_profits") or []
         record = state.add_signal(user_id, {
+            "opportunity_id": str(opportunity_id),
             "symbol": opportunity.get("symbol"),
             "direction": opportunity.get("direction"),
             "timeframe": opportunity.get("timeframe", "15m"),
@@ -725,8 +924,10 @@ async def handle_callback(update, context):
             "candle_time": opportunity.get("candle_time"),
             "higher_timeframe": opportunity.get("higher_timeframe"),
         })
+        state.mark_opportunity_claimed(opportunity_id, user_id)
         message = (
             f"✅ Opportunity saved as tracked signal #{record['id']}. "
+            "It has been removed from your Strong Signals list. "
             "Automatic monitoring will now follow this signal."
         )
         if getattr(query.message, "photo", None):
@@ -795,6 +996,38 @@ async def handle_callback(update, context):
         await _show_signal_detail(query.message.chat, user_id, signal_id)
         return
 
+    if data == "settings:api_usage":
+        await show_api_usage(query.message.chat)
+        return
+
+    if data == "settings:back":
+        settings = state.get_user_settings(user_id)
+        timeframe = state.get_timeframe(user_id)
+        mode = settings.get("tracking_notification_mode", "silent")
+        mode_labels = {
+            "silent": "Silent Monitoring",
+            "important": "Important Alerts Only",
+            "all": "All Updates",
+        }
+        mode_label = mode_labels.get(mode, "Silent Monitoring")
+        text = (
+            "⚙️ PERSONAL SETTINGS\n\n"
+            f"Default timeframe: {timeframe}\n"
+            f"Preferred markets: {', '.join(settings.get('markets', []))}\n"
+            f"Risk preference: {settings.get('risk_percent', 1.0)}%\n"
+            f"Timezone: {settings.get('timezone', 'Africa/Lagos')}\n"
+            f"Tracking notifications: {mode_label}\n\n"
+            "Choose a setting below."
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📡 API Usage", callback_data="settings:api_usage")],
+            [InlineKeyboardButton("Change default timeframe", callback_data="settings:timeframe")],
+            [InlineKeyboardButton("Change risk preference", callback_data="settings:risk")],
+            [InlineKeyboardButton("Signal notification mode", callback_data="settings:notifications")],
+        ])
+        await query.edit_message_text(text, reply_markup=keyboard)
+        return
+
     if data == "settings:notifications":
         current = state.get_user_settings(user_id).get(
             "tracking_notification_mode", "silent"
@@ -821,8 +1054,8 @@ async def handle_callback(update, context):
         await query.edit_message_text(
             "Choose how Forex Hunter AI should notify you about tracked-signal events.\n\n"
             "Silent Monitoring: no TP/SL messages; progress stays in My Tracked Signals.\n"
-            "Important Alerts Only: notify on TP1, TP2, TP3 and stop loss.\n"
-            "All Updates: notify on every recorded monitoring outcome, including ambiguous outcomes.\n\n"
+            "Important Alerts Only: notify on TP1, TP2, TP3, stop loss and significant trend warnings.\n"
+            "All Updates: notify on every recorded monitoring outcome and trend warning.\n\n"
             f"Current setting: {labels.get(current, 'Silent Monitoring')}",
             reply_markup=InlineKeyboardMarkup(rows),
         )
@@ -897,24 +1130,28 @@ async def handle_callback(update, context):
     if data == "settings:risk":
         rows = [
             [
-                InlineKeyboardButton(
-                    "0.5%",
-                    callback_data="risk:0.5",
-                ),
-                InlineKeyboardButton(
-                    "1%",
-                    callback_data="risk:1",
-                ),
-                InlineKeyboardButton(
-                    "2%",
-                    callback_data="risk:2",
-                ),
-            ]
+                InlineKeyboardButton("0.5%", callback_data="risk:0.5"),
+                InlineKeyboardButton("1%", callback_data="risk:1"),
+                InlineKeyboardButton("2%", callback_data="risk:2"),
+            ],
+            [InlineKeyboardButton("✍️ Custom percentage", callback_data="risk:custom")],
         ]
-
         await query.edit_message_text(
-            "Choose your preferred risk percentage:",
+            "Choose your preferred risk percentage.\n\n"
+            "You can select a preset or enter a custom value from 0.1% to 5%. "
+            "This setting is a planning preference only; the bot does not "
+            "calculate broker lot sizes or place trades.",
             reply_markup=InlineKeyboardMarkup(rows),
+        )
+        return
+
+    if data == "risk:custom":
+        context.user_data["awaiting_custom_risk"] = True
+        await query.edit_message_text(
+            "✍️ Send your custom risk percentage as a number.\n\n"
+            "Examples: 0.75, 1.25, or 1.5\n"
+            "Allowed range: 0.1% to 5%.\n\n"
+            "Type cancel to leave this setting unchanged."
         )
         return
 
@@ -940,6 +1177,39 @@ async def handle_callback(update, context):
 
 async def handle_text(update, context):
     text = (update.message.text or "").strip()
+
+    if text.lower() == "cancel" and context.user_data.get("awaiting_custom_risk"):
+        context.user_data.pop("awaiting_custom_risk", None)
+        await update.message.reply_text(
+            "Custom risk entry cancelled. Your previous setting is unchanged.",
+            reply_markup=MENU,
+        )
+        return
+
+    if context.user_data.get("awaiting_custom_risk"):
+        try:
+            risk = float(text.replace("%", "").strip())
+        except ValueError:
+            await update.message.reply_text(
+                "Please enter a valid number, for example 0.75 or 1.25. "
+                "Allowed range: 0.1% to 5%."
+            )
+            return
+        if not 0.1 <= risk <= 5.0:
+            await update.message.reply_text(
+                "That value is outside the allowed range. Enter 0.1% to 5%."
+            )
+            return
+        state.update_user_setting(_user_id(update), "risk_percent", risk)
+        context.user_data.pop("awaiting_custom_risk", None)
+        await update.message.reply_text(
+            f"✅ Custom risk preference saved: {risk:g}%.\n\n"
+            "This is a planning preference, not a broker order or automatic "
+            "lot-size calculation. Always calculate position size from your "
+            "account balance and technical stop-loss distance.",
+            reply_markup=MENU,
+        )
+        return
 
     if text == "🔎 Market Scanner":
         await show_market_scanner(update, context)

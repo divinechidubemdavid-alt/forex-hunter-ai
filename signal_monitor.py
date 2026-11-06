@@ -1,13 +1,17 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 import pandas as pd
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 
 import state
 from config import MARKETS
 from market_data import fetch_candles, MarketDataError
+from strategy import assess_trend_health
+from chart import create_market_chart
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +92,7 @@ async def _notify(app, user_id, settings, notification_key, message):
     if mode == "silent":
         return
 
-    important_events = {"tp1", "tp2", "tp3", "stop_loss"}
+    important_events = {"tp1", "tp2", "tp3", "stop_loss", "trend_warning"}
     if mode == "important" and notification_key not in important_events:
         return
 
@@ -286,6 +290,110 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         state.update_signal(signal_id, updates)
 
 
+
+async def _check_trend_warning(app, user_id, signal, frame):
+    """Record and notify once per completed candle for each warning type."""
+    signal_id = _signal_id(signal)
+    warning = assess_trend_health(frame, signal.get("direction"))
+    previous_warning = signal.get("trend_warning_key")
+    if not warning:
+        if previous_warning:
+            state.update_signal(signal_id, {"trend_warning_key": None})
+        return
+
+    # One alert per continuous warning episode, not one alert per candle.
+    warning_key = warning["type"]
+    if previous_warning == warning_key:
+        return
+
+    state.update_signal(signal_id, {"trend_warning_key": warning_key})
+    state.add_signal_event(
+        signal_id,
+        warning["type"],
+        warning["message"],
+        {"candle_time": warning["candle_time"]},
+    )
+    settings = state.get_user_settings(user_id) or {}
+    await _notify(
+        app, user_id, settings, "trend_warning",
+        f"⚠️ {signal.get('symbol', 'Tracked signal')} — {warning['message']}",
+    )
+
+
+async def _refresh_saved_chart(app, user_id, signal, frame):
+    """Edit the user's existing tracked-signal chart; never send chart spam."""
+    chat_id = signal.get("chart_chat_id")
+    message_id = signal.get("chart_message_id")
+    signal_id = _signal_id(signal)
+    if not chat_id or not message_id or signal.get("status") != "TRACKING":
+        return
+
+    timeframe = str(signal.get("timeframe") or "15m")
+    try:
+        chart = create_market_chart(
+            frame,
+            signal.get("symbol", "Unknown"),
+            timeframe,
+            entry=signal.get("entry"),
+            stop_loss=signal.get("stop_loss"),
+            take_profits=_targets(signal),
+        )
+        chart.seek(0)
+        latest = float(frame["close"].iloc[-1])
+        caption = (
+            f"📈 {signal.get('symbol', 'Unknown')} — {signal.get('direction', 'N/A')}\n"
+            f"Signal #{signal_id} | {timeframe.upper()}\n"
+            f"Latest closed-candle price: {latest:g}\n"
+            f"Entry: {signal.get('entry', 'N/A')} | SL: {signal.get('stop_loss', 'N/A')}\n"
+            f"TP1: {signal.get('tp1', 'N/A')} | TP2: {signal.get('tp2', 'N/A')} | "
+            f"TP3: {signal.get('tp3', 'N/A')}\n"
+            f"Progress: {'✓' if signal.get('tp1_hit') else '○'} TP1  "
+            f"{'✓' if signal.get('tp2_hit') else '○'} TP2  "
+            f"{'✓' if signal.get('tp3_hit') else '○'} TP3\n"
+            f"Status: {signal.get('status', 'TRACKING')}\n"
+            "Updated from completed candles. Not a tick-by-tick live feed."
+        )[:950]
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Refresh Chart", callback_data=f"signalrefresh:{signal_id}")],
+            [InlineKeyboardButton("⬅️ Back to Tracked Signals", callback_data="signalback")],
+        ])
+        await app.bot.edit_message_media(
+            chat_id=int(chat_id),
+            message_id=int(message_id),
+            media=InputMediaPhoto(media=chart, caption=caption),
+            reply_markup=keyboard,
+        )
+        state.update_signal(signal_id, {
+            "chart_last_update": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        # A user may have deleted the message or Telegram may reject an old
+        # message edit. Keep monitoring and avoid repeatedly logging noise.
+        logger.debug(
+            "Saved chart refresh skipped for signal %s (%s).",
+            signal_id, exc,
+        )
+
+
+
+async def _fetch_monitor_frame(symbol, timeframe):
+    """Respect the shared provider cooldown instead of silently skipping a market."""
+    for attempt in range(5):
+        try:
+            return await fetch_candles(
+                MARKETS[symbol],
+                outputsize=100,
+                interval=timeframe,
+                purpose="monitor",
+            )
+        except MarketDataError as exc:
+            match = re.search(r"cooldown active\. Try again in ([0-9.]+) seconds", str(exc))
+            if not match or attempt == 4:
+                raise
+            await asyncio.sleep(float(match.group(1)) + 0.25)
+    return None
+
+
 async def _monitor_cycle(app):
     # Collect each user's signals, then fetch candles once per
     # market/timeframe combination for all users.
@@ -315,12 +423,7 @@ async def _monitor_cycle(app):
 
     for (symbol, timeframe), records in grouped.items():
         try:
-            frame = await fetch_candles(
-                MARKETS[symbol],
-                outputsize=100,
-                interval=timeframe,
-                purpose="monitor",
-            )
+            frame = await _fetch_monitor_frame(symbol, timeframe)
             if frame is None or frame.empty:
                 continue
 
@@ -339,18 +442,20 @@ async def _monitor_cycle(app):
                             pending_candles.index > signal_time
                         ]
 
-                    # Process every unseen closed candle, not only the latest
-                    # one. This prevents 1m/5m signals from skipping price
-                    # touches between 15-minute monitor cycles.
+                    # Process every unseen closed candle, not only the latest.
                     for candle_time, candle in pending_candles.iterrows():
-                        current = state.get_signal(
-                            _signal_id(signal), user_id
-                        )
+                        current = state.get_signal(_signal_id(signal), user_id)
                         if not current or current.get("status") != "TRACKING":
                             break
                         await _check_one_signal(
                             app, user_id, current, candle, candle_time
                         )
+
+                    current = state.get_signal(_signal_id(signal), user_id)
+                    if current and current.get("status") == "TRACKING":
+                        await _check_trend_warning(app, user_id, current, frame)
+                        current = state.get_signal(_signal_id(signal), user_id) or current
+                        await _refresh_saved_chart(app, user_id, current, frame)
                 except Exception:
                     logger.exception(
                         "Could not monitor signal %s for user %s.",
