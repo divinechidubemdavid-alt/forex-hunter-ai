@@ -290,6 +290,7 @@ async def _scan_market(app, symbol):
             MARKETS[symbol],
             outputsize=500,
             interval="15m",
+            purpose="auto",
         )
 
         result = analyze(
