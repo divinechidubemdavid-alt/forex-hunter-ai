@@ -177,6 +177,27 @@ async def show_market_scanner(update, context):
     )
 
 
+async def _fetch_strong_market_frame(symbol):
+    """Wait for the shared provider cooldown rather than skipping later markets."""
+    for attempt in range(12):
+        try:
+            return await fetch_candles(
+                MARKETS[symbol],
+                outputsize=500,
+                interval="15m",
+                purpose="auto",
+            )
+        except MarketDataError as exc:
+            match = re.search(
+                r"API cooldown active\. Try again in ([0-9.]+) seconds",
+                str(exc),
+            )
+            if not match or attempt == 11:
+                raise
+            await asyncio.sleep(float(match.group(1)) + 0.2)
+    raise MarketDataError("Could not obtain market data after cooldown retries.")
+
+
 async def _refresh_strong_signal_snapshot():
     """Refresh all configured markets and return every currently strong setup.
 
@@ -205,12 +226,7 @@ async def _refresh_strong_signal_snapshot():
     errors = []
     for symbol in MARKETS:
         try:
-            frame = await fetch_candles(
-                MARKETS[symbol],
-                outputsize=500,
-                interval="15m",
-                purpose="auto",
-            )
+            frame = await _fetch_strong_market_frame(symbol)
             result = analyze(frame, "15m")
             if result.get("status") not in ("BUY", "SELL"):
                 continue
