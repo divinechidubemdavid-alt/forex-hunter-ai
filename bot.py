@@ -826,8 +826,8 @@ async def handle_callback(update, context):
         await query.edit_message_text(
             "Choose how Forex Hunter AI should notify you about tracked-signal events.\n\n"
             "Silent Monitoring: no TP/SL messages; progress stays in My Tracked Signals.\n"
-            "Important Alerts Only: notify on TP1, TP2, TP3 and stop loss.\n"
-            "All Updates: notify on every recorded monitoring outcome, including ambiguous outcomes.\n\n"
+            "Important Alerts Only: notify on TP1, TP2, TP3, stop loss and significant trend warnings.\n"
+            "All Updates: notify on every recorded monitoring outcome and trend warning.\n\n"
             f"Current setting: {labels.get(current, 'Silent Monitoring')}",
             reply_markup=InlineKeyboardMarkup(rows),
         )
@@ -923,7 +923,7 @@ async def handle_callback(update, context):
             "✍️ Send your custom risk percentage as a number.\n\n"
             "Examples: 0.75, 1.25, or 1.5\n"
             "Allowed range: 0.1% to 5%.\n\n"
-            "Send /cancel to leave this setting unchanged."
+            "Type cancel to leave this setting unchanged."
         )
         return
 
@@ -950,7 +950,7 @@ async def handle_callback(update, context):
 async def handle_text(update, context):
     text = (update.message.text or "").strip()
 
-    if text == "/cancel" and context.user_data.get("awaiting_custom_risk"):
+    if text.lower() == "cancel" and context.user_data.get("awaiting_custom_risk"):
         context.user_data.pop("awaiting_custom_risk", None)
         await update.message.reply_text(
             "Custom risk entry cancelled. Your previous setting is unchanged.",
