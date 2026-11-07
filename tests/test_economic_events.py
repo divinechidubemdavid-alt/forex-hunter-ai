@@ -86,6 +86,33 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(report["analysis"]["direction"], "BEARISH")
         self.assertIn("forecast", report["analysis"]["reasons"][0])
 
+    def test_post_release_market_reaction_is_saved_and_scored(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        item["higher_is_better"] = False
+        ee.save_event(item)
+        ee.record_actual(item["id"], "3.4")
+        report = ee.record_market_reaction(
+            item["id"],
+            {"status": "AVAILABLE", "market": "EUR/USD", "currency_direction": "BEARISH",
+             "direction": "BEARISH", "adx": 28, "rsi": 42, "volatility_pct": 0.3,
+             "breakout": "NONE", "source": "test"},
+            5,
+        )
+        self.assertEqual(report["forecast_score"], "ALIGNED")
+        self.assertEqual(report["forecast_score_value"], 1)
+        self.assertEqual(report["market_reactions"][0]["minutes_after"], 5)
+
+    def test_no_consensus_does_not_claim_forecast_score(self):
+        item = self.event()
+        ee.record_actual(item["id"], "1.2")
+        report = ee.record_market_reaction(
+            item["id"],
+            {"status": "AVAILABLE", "market": "EUR/USD", "currency_direction": "BULLISH",
+             "direction": "BEARISH", "source": "test"},
+            5,
+        )
+        self.assertEqual(report["forecast_score"], "DIRECTIONAL_ALIGNMENT_ONLY")
+
     def test_usd_pair_biases_are_inverted_correctly(self):
         item = self.event(forecast="3.4", previous="3.2")
         item["higher_is_better"] = True
