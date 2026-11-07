@@ -38,7 +38,7 @@ def event_conversation(event: dict) -> list[dict]:
 def performance_summary(events: list[dict]) -> dict:
     """Aggregate recorded event outcomes without inventing missing scores."""
     summary = {
-        "events": len(events), "bullish": 0, "bearish": 0, "no_clear_direction": 0,
+        "events": len(events), "bullish": 0, "bearish": 0, "no_clear_direction": 0, "not_finalized": 0,
         "directional_scored": 0, "directional_correct": 0,
         "trades_scored": 0, "trade_wins": 0, "trade_losses": 0,
         "net_r": 0.0, "unscored": 0,
@@ -47,7 +47,9 @@ def performance_summary(events: list[dict]) -> dict:
         final = event.get("final_15m") or event.get("checkpoints", {}).get("15m") or {}
         analysis = final.get("analysis") or {}
         direction = analysis.get("combined_direction", analysis.get("direction"))
-        if direction == "BULLISH":
+        if not analysis:
+            summary["not_finalized"] += 1
+        elif direction == "BULLISH":
             summary["bullish"] += 1
         elif direction == "BEARISH":
             summary["bearish"] += 1
