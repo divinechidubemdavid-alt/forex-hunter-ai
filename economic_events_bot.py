@@ -118,7 +118,7 @@ async def handle_event_callback(update, context):
         context.user_data["econ_awaiting"] = "event"
         await query.message.reply_text(
             "Send a personal event in WAT:\n"
-            "YYYY-MM-DD HH:MM | CURRENCY | EVENT TITLE | FORECAST | PREVIOUS | HIGHER_IS_BETTER\n"
+            "YYYY-MM-DD HH:MM | CURRENCY | EVENT TITLE | FORECAST | PREVIOUS | HIGHER_SUPPORTS_CURRENCY\n"
             "Example: 2026-12-11 16:30 | USD | US CPI | 3.1 | 3.2 | no\n"
             "Use - for unknown figures. This event and its alerts are private to your Telegram account."
         )
@@ -245,7 +245,7 @@ async def handle_event_text(update, context):
             elif higher.lower() in {"no", "n", "false", "0"}:
                 higher_is_better = False
             else:
-                raise ValueError("Higher-is-better must be yes or no.")
+                raise ValueError("Enter yes if a higher reading normally supports the currency, or no if a lower reading does.")
             event = ee.create_event(
                 title, when, currency=currency, forecast=None if forecast == "-" else forecast,
                 previous=None if previous == "-" else previous, owner_id=user_id,
