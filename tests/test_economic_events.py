@@ -1,6 +1,7 @@
 import unittest
 import os
-from unittest.mock import patch
+import asyncio
+from unittest.mock import patch, AsyncMock
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -130,6 +131,42 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(ee.directional_analysis(item)["direction"], "BULLISH")
         item["actual"] = "170K"
         self.assertEqual(ee.directional_analysis(item, phase="post-event")["direction"], "BEARISH")
+
+    def test_provider_calendar_imports_consensus_and_deduplicates(self):
+        when = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        row = {
+            "CalendarId": "te-123", "Date": when, "Country": "United States",
+            "Event": "Non Farm Payrolls", "Category": "Employment",
+            "Importance": 3, "Forecast": "180K", "Previous": "175K",
+            "Revised": "170K", "Actual": "", "Source": "Bureau of Labor Statistics",
+            "SourceURL": "https://www.bls.gov/",
+        }
+        with patch.object(te, "_get", new=AsyncMock(return_value=[row])):
+            imported = asyncio.run(te.fetch_calendar_events(30))
+            repeated = asyncio.run(te.fetch_calendar_events(30))
+        self.assertEqual(len(imported), 1)
+        self.assertEqual(len(repeated), 0)
+        saved = ee.get_event(imported[0]["id"])
+        self.assertEqual(saved["provider_calendar_id"], "te-123")
+        self.assertEqual(saved["forecast"], "180K")
+        self.assertEqual(saved["forecast_type"], "market_consensus")
+        self.assertEqual(saved["previous"], "175K")
+        self.assertEqual(saved["provider_revised_previous"], "170K")
+
+    def test_provider_actual_retrieval_includes_revision_and_source(self):
+        event = self.event(forecast="180K", previous="175K")
+        event["provider_calendar_id"] = "te-456"
+        row = [{
+            "CalendarId": "te-456", "Event": "Non Farm Payrolls",
+            "Actual": "190K", "Previous": "180K", "Revised": "175K",
+            "Forecast": "185K", "Source": "BLS", "SourceURL": "https://www.bls.gov/",
+        }]
+        with patch.dict(os.environ, {"TRADING_ECONOMICS_API_KEY": "key", "TRADING_ECONOMICS_DISTRIBUTION_LICENSED": "true"}), patch.object(te, "_get", new=AsyncMock(return_value=row)):
+            actual = asyncio.run(te.fetch_event_actual(event))
+        self.assertEqual(actual["value"], "190K")
+        self.assertEqual(actual["previous_value"], "180K")
+        self.assertEqual(actual["revised_previous"], "175K")
+        self.assertEqual(actual["higher_is_better"], True)
 
     def test_provider_values_support_units(self):
         self.assertEqual(ee._to_number("175K"), 175000)
