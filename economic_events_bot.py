@@ -305,7 +305,8 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f'{pair}: {bias}' for pair, bias in analysis.get("market_biases", {}).items()
     ) or "No mapped pair bias available."
     technical_text = (
-        f'{snapshot.get("market", "Market")}: {snapshot.get("direction", "UNAVAILABLE")} '
+        f'{snapshot.get("market", "Market")} pair: {snapshot.get("direction", "UNAVAILABLE")} '
+        f'| {event.get("currency", "USD")} strength: {snapshot.get("currency_direction", "UNAVAILABLE")} '
         f'| ADX {snapshot.get("adx", "N/A")} | RSI {snapshot.get("rsi", "N/A")} '
         f'| ATR {snapshot.get("atr", "N/A")} | breakout {snapshot.get("breakout", "N/A")}'
         if snapshot.get("status") == "AVAILABLE" else
