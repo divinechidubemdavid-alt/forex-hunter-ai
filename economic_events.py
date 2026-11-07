@@ -141,7 +141,7 @@ def directional_analysis(event, technical=None, phase="pre-event"):
     }
 
 
-def record_checkpoint(event_id, checkpoint, technical=None, evidence_note=""):
+def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None):
     if checkpoint not in dict(CHECKPOINTS):
         raise ValueError("Unsupported event checkpoint.")
     event = get_event(event_id)
@@ -151,6 +151,7 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note=""):
     record = {
         "checkpoint": checkpoint, "created_at": _now().isoformat(),
         "analysis": analysis, "evidence_note": str(evidence_note),
+        "technical_snapshot": technical_snapshot or {},
     }
     if checkpoint == "15m":
         event["final_15m"] = record
@@ -158,24 +159,35 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note=""):
         baseline = event.get("final_15m")
         if not baseline:
             record["verification"] = "NO_15M_BASELINE"
-            record["analysis"] = analysis
         else:
-            # Only an explicitly supplied material-change note permits a revision.
-            material = bool(str(evidence_note).strip())
-            if not material:
+            from economic_research import material_change
+            changed, changes = material_change(
+                baseline.get("technical_snapshot") or {},
+                technical_snapshot or {},
+            )
+            record["prior_analysis"] = baseline["analysis"]
+            record["material_changes"] = changes
+            if not changed:
                 record["analysis"] = baseline["analysis"]
                 record["verification"] = "CONFIRMED_UNCHANGED"
             else:
-                record["verification"] = "REVIEW_REQUIRED"
-                record["prior_analysis"] = baseline["analysis"]
-                record["analysis"] = analysis
+                record["verification"] = "DIRECTION_REVIEWED"
+                record["analysis"] = directional_analysis(
+                    event, technical=technical, phase="pre-event"
+                )
+                record["analysis"]["reasons"].append(
+                    "Material 5-minute evidence: " + "; ".join(changes)
+                )
+                record["analysis"]["confidence"] = min(
+                    record["analysis"]["confidence"], baseline["analysis"]["confidence"]
+                )
     event.setdefault("checkpoints", {})[checkpoint] = record
     event.setdefault("history", []).append(record)
     save_event(event)
     return record
 
 
-def record_actual(event_id, actual, revised_previous=None, notes=""):
+def record_actual(event_id, actual, revised_previous=None, notes="", details=None):
     event = get_event(event_id)
     if not event:
         raise KeyError("Economic event not found.")
@@ -187,6 +199,7 @@ def record_actual(event_id, actual, revised_previous=None, notes=""):
         "created_at": _now().isoformat(), "actual": actual,
         "forecast": event.get("forecast"), "previous": event.get("previous"),
         "revised_previous": revised_previous, "notes": str(notes),
+        "actual_details": details or {},
         "analysis": directional_analysis(event, phase="post-event"),
     }
     event["post_event_report"] = report
@@ -197,7 +210,10 @@ def record_actual(event_id, actual, revised_previous=None, notes=""):
 
 async def fetch_ics_events(url=None):
     """Import VEVENT entries from a configured, rights-cleared ICS calendar feed."""
-    feed_url = url or os.getenv("ECONOMIC_CALENDAR_ICS_URL", "").strip()
+    feed_url = url or os.getenv(
+        "ECONOMIC_CALENDAR_ICS_URL",
+        "https://www.bls.gov/schedule/news_release/bls.ics",
+    ).strip()
     if not feed_url:
         return []
     if not feed_url.startswith("https://"):
