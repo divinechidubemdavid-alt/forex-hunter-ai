@@ -1,6 +1,7 @@
 """Telegram UI and scheduler for Economic Event Intelligence."""
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -85,6 +86,15 @@ def _owns_event(event, user_id):
     )
 
 
+def _can_edit_event(event, user_id):
+    if not event:
+        return False
+    if event.get("owner_id") is not None:
+        return str(event.get("owner_id")) == str(user_id)
+    owner_id = os.getenv("BOT_OWNER_ID", "").strip()
+    return bool(owner_id) and str(user_id) == owner_id
+
+
 async def handle_event_callback(update, context):
     query = update.callback_query
     await query.answer()
@@ -119,6 +129,12 @@ async def handle_event_callback(update, context):
             await query.message.reply_text("That event is not available in your event history.")
             return
         if action == "actual":
+            if not _can_edit_event(event, user_id):
+                await query.message.reply_text(
+                    "Only the bot owner can manually edit a shared official event. "
+                    "Automatic provider actuals remain enabled."
+                )
+                return
             context.user_data["econ_awaiting"] = "actual:" + event_id
             await query.message.reply_text(
                 "Send published actual data as: ACTUAL | REVISED_PREVIOUS (or -) | NOTES\n"
@@ -148,7 +164,9 @@ async def handle_event_callback(update, context):
             )
             await query.message.reply_photo(photo=photo, caption=caption[:1020])
             return
-        analysis = ee.directional_analysis(event)
+        analysis = ee.directional_analysis(
+            event, phase="post-event" if event.get("actual") is not None else "pre-event"
+        )
         report = event.get("post_event_report")
         checkpoints = event.get("checkpoints", {})
         checkpoint_text = "\n".join(
@@ -206,8 +224,8 @@ async def handle_event_text(update, context):
         elif mode.startswith("actual:"):
             event_id = mode.split(":", 1)[1]
             event = ee.get_event(event_id)
-            if not _owns_event(event, user_id):
-                raise ValueError("This event does not belong to your account.")
+            if not _can_edit_event(event, user_id):
+                raise ValueError("You cannot edit this shared event. Only its owner or the configured bot owner can enter actuals.")
             parts = [p.strip() for p in raw.split("|", 2)]
             if len(parts) != 3:
                 raise ValueError("Please use ACTUAL | REVISED_PREVIOUS (or -) | NOTES.")
