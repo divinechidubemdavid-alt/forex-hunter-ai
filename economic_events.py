@@ -116,11 +116,15 @@ def directional_analysis(event, technical=None, phase="pre-event"):
             # higher or lower is favourable. Require explicit event metadata.
             favourable = event.get("higher_is_better")
             if prior is not None and favourable is not None:
-                positive = (value > prior) == bool(favourable)
-                direction = "BULLISH" if positive else "BEARISH"
-                confidence = 55
-                reference_label = 'forecast' if phase == 'post-event' else 'previous'
-                reasons.append(f"{'Higher' if value > prior else 'Lower'} reading versus {reference_label} ({comparator}); event preference metadata applied.")
+                reference_label = 'forecast' if phase == 'post-event' and forecast is not None else 'previous'
+                if value == prior:
+                    direction = "NEUTRAL"
+                    reasons.append(f"Reading unchanged versus {reference_label} ({comparator}); no directional surprise.")
+                else:
+                    positive = (value > prior) == bool(favourable)
+                    direction = "BULLISH" if positive else "BEARISH"
+                    confidence = 55
+                    reasons.append(f"{'Higher' if value > prior else 'Lower'} reading versus {reference_label} ({comparator}); event preference metadata applied.")
             else:
                 reasons.append("Figure recorded, but its favourable direction is not defined; no directional assumption made.")
         except (TypeError, ValueError):
