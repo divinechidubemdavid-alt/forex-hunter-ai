@@ -47,7 +47,7 @@ def is_high_impact(title):
 
 def create_event(title, scheduled_at, currency="USD", impact="high",
                  source="user-entered", forecast=None, previous=None,
-                 actual=None, notes=""):
+                 actual=None, notes="", owner_id=None):
     title = str(title).strip()
     if not title:
         raise ValueError("Event title is required.")
@@ -59,7 +59,8 @@ def create_event(title, scheduled_at, currency="USD", impact="high",
         "scheduled_at": when.isoformat(), "currency": str(currency).upper(),
         "impact": str(impact).lower(), "source": str(source),
         "forecast": forecast, "previous": previous, "actual": actual,
-        "notes": str(notes), "status": "scheduled", "checkpoints": {},
+        "notes": str(notes), "owner_id": str(owner_id) if owner_id is not None else None,
+        "status": "scheduled", "checkpoints": {},
         "created_at": _now().isoformat(), "history": [],
     }
     events = state.get_scanner_state("economic_events", []) or []
@@ -68,10 +69,12 @@ def create_event(title, scheduled_at, currency="USD", impact="high",
     return event
 
 
-def list_events(include_past=False, limit=30):
+def list_events(include_past=False, limit=30, user_id=None):
     events = state.get_scanner_state("economic_events", []) or []
     now = _now()
-    rows = [e for e in events if include_past or _parse_dt(e["scheduled_at"]) >= now - timedelta(hours=2)]
+    rows = [e for e in events
+            if (include_past or _parse_dt(e["scheduled_at"]) >= now - timedelta(hours=2))
+            and (e.get("owner_id") is None or str(e.get("owner_id")) == str(user_id))]
     return sorted(rows, key=lambda e: e["scheduled_at"])[:max(1, int(limit))]
 
 
@@ -96,7 +99,7 @@ def directional_analysis(event, technical=None, phase="pre-event"):
     actual = event.get("actual")
     previous = event.get("previous")
     basis = actual if phase == "post-event" and actual is not None else forecast
-    comparator = forecast if phase == "post-event" else previous
+    comparator = (forecast if forecast is not None else previous) if phase == "post-event" else previous
     currency = event.get("currency", "USD").upper()
     title = event.get("title", "Economic event")
     direction, confidence, reasons = "NEUTRAL", 35, []
