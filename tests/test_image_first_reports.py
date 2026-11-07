@@ -62,7 +62,7 @@ class ImageFirstReportTests(unittest.TestCase):
             }],
             period_label="October 2026",
         )
-        self.assertEqual(report.read(8), b"\\x89PNG\\r\\n\\x1a\\n")
+        self.assertEqual(report.read(8), b"\x89PNG\r\n\x1a\n")
         report.close()
 
     def test_performance_report_is_a_png_image(self):
@@ -76,7 +76,7 @@ class ImageFirstReportTests(unittest.TestCase):
             }],
             period_label="Last 30 days",
         )
-        self.assertEqual(report.read(8), b"\\x89PNG\\r\\n\\x1a\\n")
+        self.assertEqual(report.read(8), b"\x89PNG\r\n\x1a\n")
         report.close()
 
 
