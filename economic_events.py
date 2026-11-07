@@ -224,6 +224,8 @@ def directional_analysis(event, technical=None, phase="pre-event"):
 
 def _event_evidence(event):
     return {
+        "title": event.get("title"),
+        "currency": event.get("currency"),
         "scheduled_at": event.get("scheduled_at"),
         "forecast": event.get("forecast"),
         "forecast_type": event.get("forecast_type"),
@@ -241,6 +243,8 @@ def _material_event_change(previous, current):
     changes = []
     if not previous:
         return changes
+    if previous.get("title") != current.get("title") or previous.get("currency") != current.get("currency"):
+        changes.append("event identity/details changed")
     if previous.get("scheduled_at") != current.get("scheduled_at"):
         changes.append("event schedule details changed")
     if previous.get("actual") is None and current.get("actual") is not None:
