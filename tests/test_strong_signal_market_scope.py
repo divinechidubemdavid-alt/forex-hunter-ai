@@ -20,8 +20,8 @@ MARKETS = {
 }
 
 WEEKDAY_EXPECTED = [
-    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD",
-    "USD/CAD", "USD/CHF", "XAU/USD",
+    "XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY",
+    "AUD/USD", "USD/CAD", "USD/CHF",
 ]
 
 
