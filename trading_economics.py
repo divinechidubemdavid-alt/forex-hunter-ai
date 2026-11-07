@@ -7,6 +7,8 @@ fallbacks and never fabricates consensus values.
 from __future__ import annotations
 
 import os
+import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -14,6 +16,8 @@ import httpx
 import economic_events as ee
 
 BASE_URL = "https://api.tradingeconomics.com"
+_REQUEST_LOCK = asyncio.Lock()
+_LAST_REQUEST_AT = 0.0
 COUNTRY_CURRENCY = {
     "united states": "USD", "euro area": "EUR", "germany": "EUR",
     "france": "EUR", "italy": "EUR", "spain": "EUR",
@@ -73,13 +77,19 @@ def _consensus(row):
 
 
 async def _get(path: str, params=None):
+    global _LAST_REQUEST_AT
     query = dict(params or {})
     query["c"] = _key()
     query["f"] = "json"
-    async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-        response = await client.get(f"{BASE_URL}{path}", params=query)
-        response.raise_for_status()
-        data = response.json()
+    async with _REQUEST_LOCK:
+        delay = 0.55 - (time.monotonic() - _LAST_REQUEST_AT)
+        if delay > 0:
+            await asyncio.sleep(delay)
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+            response = await client.get(f"{BASE_URL}{path}", params=query)
+            response.raise_for_status()
+            data = response.json()
+        _LAST_REQUEST_AT = time.monotonic()
     if isinstance(data, dict) and data.get("error"):
         raise RuntimeError(str(data["error"]))
     return data
