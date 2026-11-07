@@ -451,18 +451,20 @@ async def economic_events_loop(application):
                                     ee.save_event(event)
                             except Exception:
                                 log.exception("BLS model baseline could not be prepared")
-                    if checkpoint in {"24h", "1h"} and te.configured():
+                    if te.configured():
                         try:
+                            event = await _refresh_provider_event(event)
                             news = await te.fetch_event_news(event, limit=3)
-                            yields = await te.fetch_bond_yield_context(event)
                             if news:
                                 event["research_news"] = news
-                            if yields:
-                                event["bond_yield_context"] = yields
+                            if checkpoint in {"24h", "1h"}:
+                                yields = await te.fetch_bond_yield_context(event)
+                                if yields:
+                                    event["bond_yield_context"] = yields
                             event["provider_context_checked_at"] = datetime.now(timezone.utc).isoformat()
                             ee.save_event(event)
                         except Exception:
-                            log.exception("Economic news research unavailable for %s", event.get("title"))
+                            log.exception("Economic event/news/yield refresh unavailable for %s", event.get("title"))
                     event = ee.get_event(event["id"]) or event
                     snapshot = await research.technical_snapshot(event, checkpoint)
                     frame = snapshot.pop("_frame", None)
