@@ -230,10 +230,11 @@ def _event_evidence(event):
         "forecast": event.get("forecast"),
         "forecast_type": event.get("forecast_type"),
         "previous": event.get("previous"),
+        "provider_revised_previous": event.get("provider_revised_previous"),
         "actual": event.get("actual"),
         "provider_context_status": event.get("provider_context_status", "NOT_CONFIGURED"),
-        "news_titles": sorted({
-            str(item.get("title", "")).strip()
+        "news_signatures": sorted({
+            str(item.get("title", "")).strip() + "|" + str(item.get("description", "")).strip()[:160]
             for item in event.get("research_news", [])
             if item.get("title")
         }),
@@ -257,6 +258,10 @@ def _material_event_change(previous, current):
         changes.append("fresh economic/news context became available")
     if previous.get("previous") != current.get("previous"):
         changes.append("previous-period figure or revision changed")
+    if previous.get("provider_revised_previous") != current.get("provider_revised_previous"):
+        changes.append("provider's previous-period revision detail changed")
+    if previous.get("forecast_type") != current.get("forecast_type"):
+        changes.append("forecast source/type changed")
     old_forecast = previous.get("forecast")
     new_forecast = current.get("forecast")
     if old_forecast != new_forecast:
@@ -266,8 +271,8 @@ def _material_event_change(previous, current):
                 changes.append("forecast value/source changed")
         elif abs(new_number - old_number) >= max(0.01, abs(old_number) * 0.002):
             changes.append("consensus/model forecast changed materially")
-    old_news = set(previous.get("news_titles") or [])
-    new_news = set(current.get("news_titles") or [])
+    old_news = set(previous.get("news_signatures") or previous.get("news_titles") or [])
+    new_news = set(current.get("news_signatures") or current.get("news_titles") or [])
     if new_news - old_news:
         changes.append("new provider economic-news headline(s) detected")
     return changes
