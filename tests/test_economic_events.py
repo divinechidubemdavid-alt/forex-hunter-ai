@@ -62,12 +62,22 @@ class EconomicEventTests(unittest.TestCase):
 
     def test_5m_preserves_15m_forecast_without_material_change(self):
         item = self.event(forecast="3.1", previous="3.2")
+        item["provider_context_status"] = "OFFICIAL_FALLBACK"
+        ee.save_event(item)
         baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
         current_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 27, "breakout": "NONE", "volatility_pct": 0.21}
         baseline = ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
         verified = ee.record_checkpoint(item["id"], "5m", technical="BULLISH", technical_snapshot=current_snapshot)
         self.assertEqual(verified["verification"], "CONFIRMED_UNCHANGED")
         self.assertEqual(verified["analysis"], baseline["analysis"])
+
+    def test_5m_reports_technical_only_confirmation_when_global_context_is_not_configured(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
+        current_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 26, "breakout": "NONE", "volatility_pct": 0.21}
+        ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
+        verified = ee.record_checkpoint(item["id"], "5m", technical="BULLISH", technical_snapshot=current_snapshot)
+        self.assertEqual(verified["verification"], "TECHNICAL_ONLY_CONFIRMED")
 
     def test_5m_does_not_claim_confirmation_without_fresh_market_data(self):
         item = self.event(forecast="3.1", previous="3.2")
@@ -79,6 +89,8 @@ class EconomicEventTests(unittest.TestCase):
 
     def test_ordinary_ema_flip_with_weak_adx_does_not_revise_forecast(self):
         item = self.event(forecast="3.1", previous="3.2")
+        item["provider_context_status"] = "OFFICIAL_FALLBACK"
+        ee.save_event(item)
         baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 18, "breakout": "NONE", "volatility_pct": 0.2}
         noisy_flip = {"status": "AVAILABLE", "direction": "BEARISH", "adx": 17, "breakout": "NONE", "volatility_pct": 0.21}
         baseline = ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
