@@ -138,6 +138,7 @@ async def handle_event_callback(update, context):
             f'15-minute bullish forecasts: {stats["bullish"]}\n'
             f'15-minute bearish forecasts: {stats["bearish"]}\n'
             f'No clear direction / other: {stats["no_clear_direction"]}\n'
+            f'Not yet finalized: {stats["not_finalized"]}\n'
             f'Directional accuracy: {accuracy} ({stats["directional_correct"]}/{stats["directional_scored"]} scored events)\n'
             f'Trade outcomes recorded: {stats["trades_scored"]}\n'
             f'Trade wins/losses: {stats["trade_wins"]}/{stats["trade_losses"]}\n'
@@ -197,7 +198,16 @@ async def handle_event_callback(update, context):
                 )
                 + "\n" + "\n".join("• " + x for x in analysis["reasons"])
             )
-            await query.message.reply_photo(photo=photo, caption=caption[:1020])
+            sent_chart = await query.message.reply_photo(photo=photo, caption=caption[:1020])
+            if sent_chart.photo:
+                event.setdefault("chart_images", []).append({
+                    "file_id": sent_chart.photo[-1].file_id,
+                    "checkpoint": "post_event_report",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "event_id": event_id,
+                })
+                event["chart_images"] = event["chart_images"][-20:]
+                ee.save_event(event)
             return
         report = event.get("post_event_report")
         checkpoints = event.get("checkpoints", {})
