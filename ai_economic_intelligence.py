@@ -6,7 +6,6 @@ rules engine remains the fallback when the OpenAI key/service is unavailable.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -114,6 +113,8 @@ def _validate_result(raw: dict, currency: str) -> dict:
         fundamental = "NEUTRAL"
     if label in {"MIXED", "INCONCLUSIVE"}:
         fundamental = "NEUTRAL"
+    elif label in {"BULLISH", "BEARISH"}:
+        fundamental = label
     try:
         confidence = max(0, min(95, int(raw.get("confidence", 25))))
     except (TypeError, ValueError):
