@@ -315,7 +315,7 @@ async def _check_trend_warning(app, user_id, signal, frame):
     )
     settings = state.get_user_settings(user_id) or {}
     mode = str(settings.get("tracking_notification_mode", "silent")).lower()
-    if mode == "silent" or (mode == "important" and "trend_warning" not in {"tp1", "tp2", "tp3", "stop_loss", "trend_warning"}):
+    if mode not in {"important", "all"}:
         return
     if mode not in {"important", "all"}:
         return
