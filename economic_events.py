@@ -138,13 +138,27 @@ def directional_analysis(event, technical=None, phase="pre-event"):
         else:
             confidence = max(20, confidence - 15)
             reasons.append(f"Technical context conflicts ({technical}); confidence reduced, not blocked.")
+    pairs = {
+        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "XAU/USD"],
+        "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
+        "AUD": ["AUD/USD"], "CAD": ["USD/CAD"], "CHF": ["USD/CHF"],
+    }.get(currency, [])
+    market_biases = {}
+    for pair in pairs:
+        base, quote = pair.split("/")
+        if currency == base:
+            pair_direction = direction
+        elif currency == quote:
+            pair_direction = {"BULLISH": "BEARISH", "BEARISH": "BULLISH"}.get(direction, direction)
+        else:
+            pair_direction = "NEUTRAL"
+        market_biases[pair] = (
+            "BUY" if pair_direction == "BULLISH" else
+            "SELL" if pair_direction == "BEARISH" else "NEUTRAL"
+        )
     return {
         "currency": currency, "direction": direction, "confidence": confidence,
-        "affected_markets": {
-            "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "XAU/USD"],
-            "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
-            "AUD": ["AUD/USD"], "CAD": ["USD/CAD"], "CHF": ["USD/CHF"],
-        }.get(currency, []),
+        "affected_markets": pairs, "market_biases": market_biases,
         "phase": phase, "basis": "actual" if phase == "post-event" and actual is not None else ("forecast" if forecast is not None else "none"),
         "reasons": reasons, "technical_direction": technical or "NOT PROVIDED",
         "disclaimer": "Directional research, not a confirmed trade entry or guaranteed outcome.",
