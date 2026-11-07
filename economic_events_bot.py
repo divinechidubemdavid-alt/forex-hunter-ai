@@ -330,8 +330,10 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
     if checkpoint == "5m":
         if record.get("verification") == "CONFIRMED_UNCHANGED":
             text += "\n\n15-MINUTE FORECAST CONFIRMED — UNCHANGED."
-        elif record.get("verification") == "DIRECTION_REVIEWED":
-            text += "\n\nDIRECTION REVISED — NEW MATERIAL TECHNICAL EVIDENCE DETECTED."
+        elif record.get("verification") == "DIRECTION_REVISED":
+            text += "\n\nDIRECTION REVISED — NEW MATERIAL EVIDENCE DETECTED."
+        elif record.get("verification") == "REVIEWED_MATERIAL_CHANGE":
+            text += "\n\nMATERIAL TECHNICAL/RISK CHANGE — COMBINED DIRECTION UNCHANGED; REVIEWED."
         elif record.get("verification") == "NO_15M_BASELINE":
             text += "\n\n5-MINUTE VERIFICATION INCOMPLETE — NO 15-MINUTE BASELINE."
         elif record.get("verification") == "UNAVAILABLE":
