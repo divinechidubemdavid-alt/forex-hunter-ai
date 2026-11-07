@@ -107,6 +107,34 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(verified["verification"], "REVIEWED_MATERIAL_CHANGE")
         self.assertEqual(verified["analysis"]["combined_direction"], "BULLISH")
 
+    def test_five_minute_consensus_change_can_revise_combined_direction(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        item["higher_is_better"] = False
+        baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
+        ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
+        item = ee.get_event(item["id"])
+        item["forecast"] = "3.3"
+        ee.save_event(item)
+        current_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 26, "breakout": "NONE", "volatility_pct": 0.21}
+        verified = ee.record_checkpoint(item["id"], "5m", technical="BULLISH", technical_snapshot=current_snapshot)
+        self.assertEqual(verified["verification"], "DIRECTION_REVISED")
+        self.assertEqual(verified["analysis"]["combined_direction"], "BEARISH")
+        self.assertIn("consensus/model forecast changed materially", verified["material_changes"])
+
+    def test_new_economic_news_is_reviewed_without_fabricating_direction(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        item["higher_is_better"] = False
+        baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
+        ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
+        item = ee.get_event(item["id"])
+        item["research_news"] = [{"title": "New central bank development", "description": "Headline text"}]
+        ee.save_event(item)
+        current_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 26, "breakout": "NONE", "volatility_pct": 0.21}
+        verified = ee.record_checkpoint(item["id"], "5m", technical="BULLISH", technical_snapshot=current_snapshot)
+        self.assertEqual(verified["verification"], "REVIEWED_MATERIAL_CHANGE")
+        self.assertEqual(verified["analysis"]["combined_direction"], "BULLISH")
+        self.assertIn("new provider economic-news headline(s) detected", verified["material_changes"])
+
     def test_5m_revises_only_after_material_market_change(self):
         item = self.event(forecast="3.1", previous="3.2")
         baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
