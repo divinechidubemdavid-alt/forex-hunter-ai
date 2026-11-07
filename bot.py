@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from telegram import (
@@ -610,60 +610,96 @@ def _performance_summary(signals):
     )
 
 
-def _performance_period(signals, period):
+def _signal_report_time(signal):
+    """Use completion time for closed signals and creation time for active ones."""
+    raw = signal.get("completed_at") or signal.get("created_at")
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=WAT)
+        return parsed.astimezone(WAT)
+    except (TypeError, ValueError):
+        return None
+
+
+def _report_period(signals, period, custom_start=None, custom_end=None):
     now = datetime.now(WAT)
-    if period == "day":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        label = "Today"
+    today = now.date()
+    if period == "yesterday":
+        start_date = today - timedelta(days=1)
+        start = datetime.combine(start_date, datetime.min.time(), tzinfo=WAT)
+        end = datetime.combine(today, datetime.min.time(), tzinfo=WAT)
+        label = "Yesterday"
     elif period == "week":
-        start = (now - __import__("datetime").timedelta(days=now.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        label = "This week"
-    elif period == "month":
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        label = "This month"
+        start_date = today - timedelta(days=6)
+        start = datetime.combine(start_date, datetime.min.time(), tzinfo=WAT)
+        end = now
+        label = "Last 7 days"
+    elif period == "30days":
+        start_date = today - timedelta(days=29)
+        start = datetime.combine(start_date, datetime.min.time(), tzinfo=WAT)
+        end = now
+        label = "Last 30 days"
+    elif period == "lastmonth":
+        first_this_month = today.replace(day=1)
+        last_month_end = datetime.combine(first_this_month, datetime.min.time(), tzinfo=WAT)
+        previous_month_last_day = first_this_month - timedelta(days=1)
+        start = datetime.combine(previous_month_last_day.replace(day=1), datetime.min.time(), tzinfo=WAT)
+        end = last_month_end
+        label = previous_month_last_day.strftime("%B %Y")
+    elif period == "twomonthsago":
+        first_this_month = today.replace(day=1)
+        last_month_first = (first_this_month - timedelta(days=1)).replace(day=1)
+        two_months_first = (last_month_first - timedelta(days=1)).replace(day=1)
+        start = datetime.combine(two_months_first, datetime.min.time(), tzinfo=WAT)
+        end = datetime.combine(last_month_first, datetime.min.time(), tzinfo=WAT)
+        label = two_months_first.strftime("%B %Y")
+    elif period == "custom":
+        if not custom_start or not custom_end:
+            return [], "Custom date range"
+        start = datetime.combine(custom_start, datetime.min.time(), tzinfo=WAT)
+        end = datetime.combine(custom_end + timedelta(days=1), datetime.min.time(), tzinfo=WAT)
+        label = f"{custom_start:%d %b %Y} – {custom_end:%d %b %Y}"
     else:
-        return list(signals), "All time"
+        return list(signals), "All history"
 
     filtered = []
     for signal in signals:
-        try:
-            created = datetime.fromisoformat(
-                str(signal.get("created_at")).replace("Z", "+00:00")
-            ).astimezone(WAT)
-        except (TypeError, ValueError):
-            continue
-        if created >= start:
+        activity_time = _signal_report_time(signal)
+        if activity_time and start <= activity_time < end:
             filtered.append(signal)
     return filtered, label
 
 
-def _performance_period_keyboard():
+def _report_period_keyboard(report_type):
+    prefix = "perf" if report_type == "performance" else "history"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Today", callback_data="perf:day"),
-            InlineKeyboardButton("This week", callback_data="perf:week"),
+            InlineKeyboardButton("Yesterday", callback_data=f"{prefix}:yesterday"),
+            InlineKeyboardButton("Last 7 days", callback_data=f"{prefix}:week"),
         ],
         [
-            InlineKeyboardButton("This month", callback_data="perf:month"),
-            InlineKeyboardButton("All time", callback_data="perf:all"),
+            InlineKeyboardButton("Last 30 days", callback_data=f"{prefix}:30days"),
+            InlineKeyboardButton("Last month", callback_data=f"{prefix}:lastmonth"),
+        ],
+        [
+            InlineKeyboardButton("2 months ago", callback_data=f"{prefix}:twomonthsago"),
+            InlineKeyboardButton("All history", callback_data=f"{prefix}:all"),
+        ],
+        [
+            InlineKeyboardButton("📅 Custom dates", callback_data=f"{prefix}:custom"),
         ],
     ])
 
 
-async def _send_performance(chat, user_id, period):
+async def _send_performance(chat, user_id, period, custom_start=None, custom_end=None):
     all_signals = state.get_signal_history(user_id, limit=10000)
-    signals, label = _performance_period(all_signals, period)
+    signals, label = _report_period(all_signals, period, custom_start, custom_end)
     report = create_performance_report(signals, period_label=label)
     await chat.send_photo(
         photo=report,
-        caption=f"📊 PERFORMANCE CENTRE — {label}",
-        reply_markup=_performance_period_keyboard(),
-    )
-    await chat.send_message(
-        _performance_summary(signals),
-        reply_markup=MENU,
+        caption=f"📊 PERFORMANCE CENTRE — {label}\nImage report • WAT",
+        reply_markup=_report_period_keyboard("performance"),
     )
 
 
@@ -671,26 +707,19 @@ async def show_performance(update, context):
     await _send_performance(update.effective_chat, _user_id(update), "all")
 
 
-async def show_history(update, context):
-    signals = state.get_signal_history(_user_id(update), limit=30)
-    report = create_history_report(signals)
-    await update.message.reply_photo(
+async def _send_history(chat, user_id, period, custom_start=None, custom_end=None):
+    all_signals = state.get_signal_history(user_id, limit=10000)
+    signals, label = _report_period(all_signals, period, custom_start, custom_end)
+    report = create_history_report(signals, period_label=label)
+    await chat.send_photo(
         photo=report,
-        caption="📚 SIGNAL HISTORY — visual history report",
+        caption=f"📚 SIGNAL HISTORY — {label}\nVisual trade record • WAT",
+        reply_markup=_report_period_keyboard("history"),
     )
-    if not signals:
-        await update.message.reply_text("No saved signals yet.", reply_markup=MENU)
-        return
-    lines = ["📚 RECENT SIGNAL HISTORY\n"]
-    for signal in signals[:20]:
-        lines.append(
-            f"#{signal.get('id')} {signal.get('symbol', 'N/A')} "
-            f"{signal.get('direction', 'N/A')}\n"
-            f"Status: {signal.get('status', 'N/A')} | "
-            f"Score: {signal.get('score', 0)}/100 | "
-            f"Realised R: {signal.get('realised_r', 0)}"
-        )
-    await update.message.reply_text("\n".join(lines), reply_markup=MENU)
+
+
+async def show_history(update, context):
+    await _send_history(update.effective_chat, _user_id(update), "all")
 
 
 async def show_settings(update, context):
@@ -915,11 +944,26 @@ async def handle_callback(update, context):
         )
         return
 
-    if data.startswith("perf:"):
-        period = data.split(":", 1)[1]
-        if period not in {"day", "week", "month", "all"}:
+    if data.startswith("perf:") or data.startswith("history:"):
+        report_type, period = data.split(":", 1)
+        if period == "custom":
+            context.user_data["report_date_range"] = {"type": report_type}
+            await query.message.reply_text(
+                "📅 CUSTOM REPORT RANGE\n\n"
+                "Send the START date in YYYY-MM-DD format.\n"
+                "Example: 2026-10-01"
+            )
             return
-        await _send_performance(query.message.chat, user_id, period)
+        allowed_periods = {
+            "yesterday", "week", "30days", "lastmonth",
+            "twomonthsago", "all",
+        }
+        if period not in allowed_periods:
+            return
+        if report_type == "perf":
+            await _send_performance(query.message.chat, user_id, period)
+        else:
+            await _send_history(query.message.chat, user_id, period)
         return
 
     if data.startswith("optrack:"):
@@ -1284,6 +1328,49 @@ async def handle_text(update, context):
         return
     if await handle_event_text(update, context):
         return
+
+    pending_range = context.user_data.get("report_date_range")
+    if pending_range:
+        raw_date = (update.message.text or "").strip()
+        try:
+            parsed_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        except ValueError:
+            await update.message.reply_text(
+                "Please use YYYY-MM-DD, for example 2026-10-01. "
+                "Your custom report range is still waiting."
+            )
+            return
+
+        if "start" not in pending_range:
+            pending_range["start"] = parsed_date
+            await update.message.reply_text(
+                "Now send the END date in YYYY-MM-DD format. "
+                "The end date is included in the report."
+            )
+            return
+
+        start_date = pending_range["start"]
+        if parsed_date < start_date:
+            await update.message.reply_text(
+                "The end date cannot be earlier than the start date. "
+                "Please send the end date again."
+            )
+            return
+
+        report_type = pending_range["type"]
+        context.user_data.pop("report_date_range", None)
+        if report_type == "performance":
+            await _send_performance(
+                update.effective_chat, _user_id(update), "custom",
+                custom_start=start_date, custom_end=parsed_date,
+            )
+        else:
+            await _send_history(
+                update.effective_chat, _user_id(update), "custom",
+                custom_start=start_date, custom_end=parsed_date,
+            )
+        return
+
     text = (update.message.text or "").strip()
 
     if text.lower() == "cancel" and context.user_data.get("awaiting_custom_risk"):
