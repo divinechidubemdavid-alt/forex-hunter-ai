@@ -233,7 +233,7 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
         "source_url": "https://www.bls.gov/developers/",
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "footnotes": unit,
-        "higher_is_better": kind in {"payroll", "hourly_earnings"},
+        "higher_is_better": kind in {"payroll", "hourly_earnings", "cpi"},
         "metrics": companion_metrics,
     }
 
