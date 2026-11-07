@@ -91,8 +91,10 @@ async def handle_event_callback(update, context):
     elif data == "econ:import":
         try:
             imported = await ee.fetch_ics_events()
+            fomc = await ee.fetch_fomc_events()
+            total = len(imported) + len(fomc)
             await query.message.reply_text(
-                f"Official BLS calendar sync complete: {len(imported)} new high-impact event(s)."
+                f"Official BLS and Federal Reserve calendar sync complete: {total} new high-impact event(s)."
                 if imported else "Official BLS calendar is up to date; no new high-impact events were added."
             )
         except Exception as exc:
@@ -281,8 +283,9 @@ async def economic_events_loop(application):
             if now.timestamp() - last_import >= 6 * 3600:
                 try:
                     await ee.fetch_ics_events()
+                    await ee.fetch_fomc_events()
                 except Exception:
-                    log.exception("Official BLS calendar sync failed")
+                    log.exception("Official economic calendar sync failed")
                 last_import = now.timestamp()
             for event in ee.list_events(include_past=False, limit=100):
                 if event.get("status") == "scheduled" and ee._parse_dt(event["scheduled_at"]) <= now:
