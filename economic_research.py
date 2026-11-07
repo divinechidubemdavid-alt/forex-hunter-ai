@@ -194,6 +194,37 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
         label = "Average hourly earnings month-over-month change (%)"
     if actual is None:
         return None
+    companion_metrics = []
+    if kind == "payroll":
+        unemployment_rows = {
+            _period_key(row): row for row in series.get(BLS_SERIES["unemployment"], [])
+            if _period_key(row)
+        }
+        u_current = unemployment_rows.get((ref_year, ref_month))
+        u_previous = unemployment_rows.get((prior_year, prior_month))
+        if u_current and u_previous:
+            companion_metrics.append({
+                "name": "Unemployment rate", "value": float(u_current["value"]),
+                "previous_value": float(u_previous["value"]), "higher_is_better": False,
+                "unit": "%",
+            })
+        earnings_rows = {
+            _period_key(row): row for row in series.get(BLS_SERIES["hourly_earnings"], [])
+            if _period_key(row)
+        }
+        e_current = earnings_rows.get((ref_year, ref_month))
+        e_previous = earnings_rows.get((prior_year, prior_month))
+        e_prior2 = earnings_rows.get((prior2_year, prior2_month))
+        if e_current and e_previous and e_prior2:
+            e_now = float(e_current["value"])
+            e_prev = float(e_previous["value"])
+            e_prev2 = float(e_prior2["value"])
+            companion_metrics.append({
+                "name": "Average hourly earnings monthly change",
+                "value": round((e_now / e_prev - 1) * 100, 4) if e_prev else None,
+                "previous_value": round((e_prev / e_prev2 - 1) * 100, 4) if e_prev2 else None,
+                "higher_is_better": True, "unit": "%",
+            })
     return {
         "value": round(actual, 4), "previous_value": round(previous_value, 4) if previous_value is not None else None, "label": label,
         "series_id": wanted, "reference_period": f"{ref_year}-{ref_month:02d}",
@@ -202,6 +233,7 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "footnotes": unit,
         "higher_is_better": kind in {"payroll", "hourly_earnings"},
+        "metrics": companion_metrics,
     }
 
 def _market_for_currency(currency: str) -> str | None:
