@@ -382,8 +382,10 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
             text += "\n\nMATERIAL TECHNICAL/RISK CHANGE — COMBINED DIRECTION UNCHANGED; REVIEWED."
         elif record.get("verification") == "NO_15M_BASELINE":
             text += "\n\n5-MINUTE VERIFICATION INCOMPLETE — NO 15-MINUTE BASELINE."
+        elif record.get("verification") == "TECHNICAL_ONLY_CONFIRMED":
+            text += "\n\nTECHNICAL CHECK UNCHANGED — NO LICENSED GLOBAL NEWS/CONSENSUS FEED CONFIGURED; 15-MINUTE FORECAST PRESERVED."
         elif record.get("verification") == "UNAVAILABLE":
-            text += "\n\nFRESH MARKET DATA UNAVAILABLE — ORIGINAL 15-MINUTE FORECAST PRESERVED, NOT CONFIRMED."
+            text += "\n\nFRESH EVENT/MARKET EVIDENCE UNAVAILABLE — ORIGINAL 15-MINUTE FORECAST PRESERVED, NOT CONFIRMED."
     photo = market_chart or ee.render_event_chart(event, analysis)
     recipients = [event["owner_id"]] if event.get("owner_id") else state.get_users()
     for user_id in recipients:
