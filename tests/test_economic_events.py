@@ -41,6 +41,21 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual({e["id"] for e in ee.list_events(user_id="200")}, {other["id"], global_event["id"]})
         self.assertEqual(len(ee.list_events(user_id="*")), 3)
 
+    def test_technical_conflict_reduces_confidence_without_overriding_fundamentals(self):
+        item = self.event(forecast="3.4", previous="3.2")
+        item["higher_is_better"] = True
+        analysis = ee.directional_analysis(item, technical="BEARISH")
+        self.assertEqual(analysis["fundamental_direction"], "BULLISH")
+        self.assertEqual(analysis["combined_direction"], "BULLISH")
+        self.assertLess(analysis["confidence"], 55)
+
+    def test_technical_only_bias_is_labelled_low_confidence_when_fundamentals_missing(self):
+        item = self.event()
+        analysis = ee.directional_analysis(item, technical="BEARISH")
+        self.assertEqual(analysis["fundamental_direction"], "NEUTRAL")
+        self.assertEqual(analysis["combined_direction"], "BEARISH")
+        self.assertEqual(analysis["confidence"], 25)
+
     def test_no_fabricated_direction_without_preference_metadata(self):
         item = self.event(forecast="3.1", previous="3.2")
         self.assertEqual(ee.directional_analysis(item)["direction"], "NEUTRAL")
