@@ -311,6 +311,61 @@ async def fetch_fomc_events():
     return imported
 
 
+async def fetch_bea_events():
+    """Import GDP and Personal Income/Outlays dates from the official BEA schedule."""
+    url = "https://www.bea.gov/news/schedule/full"
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+    page = response.text
+    year = _now().year
+    imported = []
+    existing = {
+        (event["title"].casefold(), event["scheduled_at"])
+        for event in list_events(True, 300)
+    }
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", page, re.I | re.S):
+        cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row, re.I | re.S)
+        if len(cells) < 3:
+            continue
+        values = [
+            re.sub(r"\\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", cell))).strip()
+            for cell in cells
+        ]
+        date_match = re.search(
+            r"\\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+(\\d{1,2})\\b",
+            values[0], re.I,
+        )
+        time_match = re.search(r"\\b(\\d{1,2}:\\d{2})\\s*(AM|PM)\\b", values[1], re.I)
+        title = values[2]
+        if not date_match or not time_match or not is_high_impact(title):
+            continue
+        month_text = date_match.group(1).lower()[:3]
+        month = {
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+        }[month_text]
+        hour, minute = map(int, time_match.group(1).split(":"))
+        if time_match.group(2).upper() == "PM" and hour != 12:
+            hour += 12
+        elif time_match.group(2).upper() == "AM" and hour == 12:
+            hour = 0
+        try:
+            local = datetime(year, month, int(date_match.group(2)), hour, minute,
+                             tzinfo=ZoneInfo("America/New_York"))
+        except ValueError:
+            continue
+        when = local.astimezone(timezone.utc)
+        key = (title.casefold(), when.isoformat())
+        if when >= _now() - timedelta(days=2) and key not in existing:
+            imported.append(create_event(
+                title, when, currency="USD", impact="high",
+                source="U.S. Bureau of Economic Analysis official release schedule",
+            ))
+            existing.add(key)
+    return imported
+
+
 def due_checkpoints(event, now=None):
     now = _parse_dt(now or _now())
     scheduled = _parse_dt(event["scheduled_at"])
