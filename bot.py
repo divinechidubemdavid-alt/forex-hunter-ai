@@ -1133,14 +1133,21 @@ async def handle_callback(update, context):
                 InlineKeyboardButton("0.5%", callback_data="risk:0.5"),
                 InlineKeyboardButton("1%", callback_data="risk:1"),
                 InlineKeyboardButton("2%", callback_data="risk:2"),
+                InlineKeyboardButton("5%", callback_data="risk:5"),
+            ],
+            [
+                InlineKeyboardButton("10%", callback_data="risk:10"),
+                InlineKeyboardButton("15%", callback_data="risk:15"),
+                InlineKeyboardButton("20%", callback_data="risk:20"),
             ],
             [InlineKeyboardButton("✍️ Custom percentage", callback_data="risk:custom")],
         ]
         await query.edit_message_text(
             "Choose your preferred risk percentage.\n\n"
-            "You can select a preset or enter a custom value from 0.1% to 5%. "
+            "You can select a preset or enter a custom value from 0.1% to 20%. "
             "This setting is a planning preference only; the bot does not "
-            "calculate broker lot sizes or place trades.",
+            "calculate broker lot sizes or place trades. Risking 20% on one "
+            "trade is extremely aggressive and can cause rapid account losses.",
             reply_markup=InlineKeyboardMarkup(rows),
         )
         return
@@ -1150,7 +1157,7 @@ async def handle_callback(update, context):
         await query.edit_message_text(
             "✍️ Send your custom risk percentage as a number.\n\n"
             "Examples: 0.75, 1.25, or 1.5\n"
-            "Allowed range: 0.1% to 5%.\n\n"
+            "Allowed range: 0.1% to 20%.\n\n"
             "Type cancel to leave this setting unchanged."
         )
         return
@@ -1170,7 +1177,8 @@ async def handle_callback(update, context):
         await query.edit_message_text(
             f"Risk preference updated to {risk:g}%.\n\n"
             "This is a sizing preference, not a fixed lot size. "
-            "Always calculate lot size after choosing a valid technical stop loss."
+            "Always calculate lot size after choosing a valid technical stop loss. "
+            "Risking 20% on one trade is extremely aggressive and can cause rapid losses."
         )
         return
 
@@ -1192,12 +1200,12 @@ async def handle_text(update, context):
         except ValueError:
             await update.message.reply_text(
                 "Please enter a valid number, for example 0.75 or 1.25. "
-                "Allowed range: 0.1% to 5%."
+                "Allowed range: 0.1% to 20%."
             )
             return
-        if not 0.1 <= risk <= 5.0:
+        if not 0.1 <= risk <= 20.0:
             await update.message.reply_text(
-                "That value is outside the allowed range. Enter 0.1% to 5%."
+                "That value is outside the allowed range. Enter 0.1% to 20%."
             )
             return
         state.update_user_setting(_user_id(update), "risk_percent", risk)
@@ -1206,7 +1214,8 @@ async def handle_text(update, context):
             f"✅ Custom risk preference saved: {risk:g}%.\n\n"
             "This is a planning preference, not a broker order or automatic "
             "lot-size calculation. Always calculate position size from your "
-            "account balance and technical stop-loss distance.",
+            "account balance and technical stop-loss distance. Risking 20% "
+            "on one trade is extremely aggressive and can cause rapid losses.",
             reply_markup=MENU,
         )
         return
