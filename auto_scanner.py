@@ -240,12 +240,10 @@ async def _send_signal(app, symbol, result):
 
 
 async def _scan_market(app, symbol):
-    current_session_markets = get_session_markets(
-        MARKETS, datetime.now(WAT).weekday()
-    )
-    if symbol not in current_session_markets:
+    currently_eligible = _eligible_markets(datetime.now(WAT))
+    if symbol not in currently_eligible:
         logger.warning(
-            "Market %s is outside the currently allowed trading session; scan skipped.",
+            "Market %s is outside the currently eligible session or market hours; scan skipped.",
             symbol,
         )
         return
