@@ -151,7 +151,7 @@ async def fetch_calendar_events(days_ahead: int = 30) -> list[dict]:
         actual = str(row.get("Actual") or "").strip()
         if actual and not existing.get("post_event_report"):
             ee.record_actual(
-                existing["id"], actual, revised_previous=revised,
+                existing["id"], actual,
                 notes="Actual retrieved from the configured Trading Economics calendar.",
                 details={
                     "source": "Trading Economics calendar; source provider: " + str(row.get("Source") or "not specified"),
@@ -160,6 +160,11 @@ async def fetch_calendar_events(days_ahead: int = 30) -> list[dict]:
                     "calendar_id": calendar_id,
                 },
             )
+            if revised is not None:
+                saved = ee.get_event(existing["id"])
+                saved["post_event_report"]["revised_previous"] = revised
+                saved.setdefault("history", []).append({"provider_revision": revised})
+                ee.save_event(saved)
     return imported
 
 
