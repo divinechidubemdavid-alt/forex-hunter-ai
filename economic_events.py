@@ -247,7 +247,8 @@ def record_actual(event_id, actual, revised_previous=None, notes="", details=Non
     event["status"] = "released"
     report = {
         "created_at": _now().isoformat(), "actual": actual,
-        "forecast": event.get("forecast"), "previous": original_previous,
+        "forecast": event.get("forecast"), "forecast_type": event.get("forecast_type", "market_consensus" if event.get("forecast") is not None else None),
+        "previous": original_previous,
         "revised_previous": revised_previous, "notes": str(notes),
         "actual_details": details or {},
         "analysis": directional_analysis(event, phase="post-event"),
@@ -287,6 +288,8 @@ def record_market_reaction(event_id, snapshot, minutes_after):
     if fundamental in {"BULLISH", "BEARISH"} and observed in {"BULLISH", "BEARISH"}:
         if report.get("forecast") is None:
             report["forecast_score"] = "DIRECTIONAL_ALIGNMENT_ONLY" if fundamental == observed else "DIRECTIONAL_CONFLICT"
+        elif report.get("forecast_type") in {"model_estimate", "provider_model_estimate"}:
+            report["forecast_score"] = "MODEL_ESTIMATE_ALIGNED" if fundamental == observed else "MODEL_ESTIMATE_NOT_ALIGNED"
         else:
             report["forecast_score"] = "ALIGNED" if fundamental == observed else "NOT_ALIGNED"
         report["forecast_score_value"] = 1 if fundamental == observed else 0
