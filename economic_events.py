@@ -222,17 +222,61 @@ def directional_analysis(event, technical=None, phase="pre-event"):
     }
 
 
-def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None):
+def _event_evidence(event):
+    return {
+        "scheduled_at": event.get("scheduled_at"),
+        "forecast": event.get("forecast"),
+        "forecast_type": event.get("forecast_type"),
+        "previous": event.get("previous"),
+        "actual": event.get("actual"),
+        "news_titles": sorted({
+            str(item.get("title", "")).strip()
+            for item in event.get("research_news", [])
+            if item.get("title")
+        }),
+    }
+
+
+def _material_event_change(previous, current):
+    changes = []
+    if not previous:
+        return changes
+    if previous.get("scheduled_at") != current.get("scheduled_at"):
+        changes.append("event schedule details changed")
+    if previous.get("actual") is None and current.get("actual") is not None:
+        changes.append("actual release figure became available")
+    if previous.get("previous") != current.get("previous"):
+        changes.append("previous-period figure or revision changed")
+    old_forecast = previous.get("forecast")
+    new_forecast = current.get("forecast")
+    if old_forecast != new_forecast:
+        old_number, new_number = _to_number(old_forecast), _to_number(new_forecast)
+        if old_number is None or new_number is None:
+            if old_forecast != new_forecast:
+                changes.append("forecast value/source changed")
+        elif abs(new_number - old_number) >= max(0.01, abs(old_number) * 0.002):
+            changes.append("consensus/model forecast changed materially")
+    old_news = set(previous.get("news_titles") or [])
+    new_news = set(current.get("news_titles") or [])
+    if new_news - old_news:
+        changes.append("new provider economic-news headline(s) detected")
+    return changes
+
+
+def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None):
     if checkpoint not in dict(CHECKPOINTS):
         raise ValueError("Unsupported event checkpoint.")
     event = get_event(event_id)
     if not event:
         raise KeyError("Economic event not found.")
-    analysis = directional_analysis(event, technical, "pre-event")
+    phase = "post-event" if event.get("actual") is not None else "pre-event"
+    analysis = directional_analysis(event, technical, phase)
+    current_event_evidence = event_evidence or _event_evidence(event)
     record = {
         "checkpoint": checkpoint, "created_at": _now().isoformat(),
         "analysis": analysis, "evidence_note": str(evidence_note),
         "technical_snapshot": technical_snapshot or {},
+        "event_evidence": current_event_evidence,
     }
     if checkpoint == "15m":
         event["final_15m"] = record
@@ -242,49 +286,53 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
             record["verification"] = "NO_15M_BASELINE"
         else:
             record["prior_analysis"] = baseline["analysis"]
-            if (
-                (baseline.get("technical_snapshot") or {}).get("status") != "AVAILABLE"
-                or (technical_snapshot or {}).get("status") != "AVAILABLE"
-            ):
+            event_changes = _material_event_change(
+                baseline.get("event_evidence") or {},
+                current_event_evidence,
+            )
+            baseline_technical = baseline.get("technical_snapshot") or {}
+            current_technical = technical_snapshot or {}
+            technical_available = (
+                baseline_technical.get("status") == "AVAILABLE"
+                and current_technical.get("status") == "AVAILABLE"
+            )
+            technical_changes = []
+            if technical_available:
+                from economic_research import material_change
+                _, technical_changes = material_change(baseline_technical, current_technical)
+            changes = event_changes + technical_changes
+            record["material_changes"] = changes
+            if not technical_available and not event_changes:
                 record["analysis"] = baseline["analysis"]
                 record["verification"] = "UNAVAILABLE"
-                record["material_changes"] = []
+            elif not changes:
+                record["analysis"] = baseline["analysis"]
+                record["verification"] = "CONFIRMED_UNCHANGED"
             else:
-                from economic_research import material_change
-                changed, changes = material_change(
-                    baseline.get("technical_snapshot") or {},
-                    technical_snapshot or {},
+                record["analysis"] = directional_analysis(event, technical=technical, phase=phase)
+                old_direction = baseline["analysis"].get(
+                    "combined_direction", baseline["analysis"].get("direction")
                 )
-                record["material_changes"] = changes
-                if not changed:
-                    record["analysis"] = baseline["analysis"]
-                    record["verification"] = "CONFIRMED_UNCHANGED"
-                else:
-                    record["analysis"] = directional_analysis(
-                        event, technical=technical, phase="pre-event"
+                new_direction = record["analysis"].get(
+                    "combined_direction", record["analysis"].get("direction")
+                )
+                record["verification"] = (
+                    "DIRECTION_REVISED" if new_direction != old_direction
+                    else "REVIEWED_MATERIAL_CHANGE"
+                )
+                record["analysis"]["reasons"].append(
+                    "Material 5-minute evidence: " + "; ".join(changes)
+                )
+                if not technical_available:
+                    record["analysis"]["reasons"].append(
+                        "Technical verification unavailable at this checkpoint; event-data change was reviewed separately."
                     )
-                    old_direction = baseline["analysis"].get(
-                        "combined_direction", baseline["analysis"].get("direction")
-                    )
-                    new_direction = record["analysis"].get(
-                        "combined_direction", record["analysis"].get("direction")
-                    )
-                    record["verification"] = (
-                        "DIRECTION_REVISED" if new_direction != old_direction
-                        else "REVIEWED_MATERIAL_CHANGE"
+                if any("volatility" in item for item in changes):
+                    record["analysis"]["confidence"] = max(
+                        20, record["analysis"]["confidence"] - 10
                     )
                     record["analysis"]["reasons"].append(
-                        "Material 5-minute evidence: " + "; ".join(changes)
-                    )
-                    if any("volatility" in item for item in changes):
-                        record["analysis"]["confidence"] = max(
-                            20, record["analysis"]["confidence"] - 10
-                        )
-                        record["analysis"]["reasons"].append(
-                            "Volatility expansion increases event risk; avoid chasing the initial spike."
-                        )
-                    record["analysis"]["confidence"] = min(
-                        record["analysis"]["confidence"], baseline["analysis"]["confidence"]
+                        "Volatility expansion increases event risk; avoid chasing the initial spike."
                     )
     event.setdefault("checkpoints", {})[checkpoint] = record
     event.setdefault("history", []).append(record)
