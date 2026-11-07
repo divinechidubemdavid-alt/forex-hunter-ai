@@ -161,6 +161,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "View past and completed signals.\n\n"
         "⚙️ Settings\n"
         "Change personal market, timeframe, risk and notification preferences.\n\n"
+        "🗓 Economic Events\n"
+        "Review official high-impact calendars, four pre-release checkpoints, event history and post-release reports.\n\n"
         "Important:\n"
         "This bot provides market analysis only. It does not connect "
         "to your broker or place trades. Always verify prices and "
