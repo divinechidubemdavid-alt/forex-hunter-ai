@@ -494,33 +494,86 @@ def complete_signal(signal_id, result, message="Signal completed."):
 
 
 def stop_tracking_signal(signal_id, user_id):
-    """
-    Stop monitoring without recording a win or loss.
-    """
-
+    """Stop monitoring before any take-profit milestone; never label it a win."""
     with _lock:
         signal = _state["signals"].get(str(signal_id))
-
-        if not signal:
+        if not signal or signal.get("user_id") != str(user_id):
             return False
-
-        if signal.get("user_id") != str(user_id):
-            return False
-
         if signal.get("status") != "TRACKING":
             return False
-
+        if signal.get("tp1_hit") or signal.get("tp2_hit"):
+            return False
         signal["status"] = "MANUALLY_STOPPED"
         signal["completed_at"] = _now()
-
+        signal["updated_at"] = signal["completed_at"]
         _add_signal_event_locked(
             signal_id,
             "MANUALLY_STOPPED",
-            "User stopped tracking this signal.",
+            "User stopped tracking before TP1. Excluded from win/loss statistics.",
         )
-
         _save()
         return True
+
+
+def close_signal_after_target(signal_id, user_id):
+    """Close a tracked signal as a milestone-qualified manual win after TP1/TP2."""
+    with _lock:
+        signal = _state["signals"].get(str(signal_id))
+        if not signal or signal.get("user_id") != str(user_id):
+            return None
+        if signal.get("status") != "TRACKING":
+            return None
+
+        reached = 2 if signal.get("tp2_hit") else (1 if signal.get("tp1_hit") else 0)
+        if reached == 0:
+            return None
+
+        entry = float(signal.get("entry") or 0)
+        stop = float(signal.get("stop_loss") or 0)
+        exit_price = signal.get("current_price")
+        try:
+            exit_price = float(exit_price)
+        except (TypeError, ValueError):
+            exit_price = None
+
+        risk = abs(entry - stop)
+        direction = str(signal.get("direction", "")).upper()
+        if exit_price is not None and risk > 0 and direction in {"BUY", "SELL"}:
+            signed_move = exit_price - entry if direction == "BUY" else entry - exit_price
+            exit_r = signed_move / risk
+            flags = [bool(signal.get(f"tp{i}_hit")) for i in (1, 2, 3)]
+            booked_r = sum((i + 1) / 3 for i, hit in enumerate(flags) if hit)
+            remaining = max(0.0, 1.0 - sum(1 / 3 for hit in flags if hit))
+            realised_r = booked_r + remaining * exit_r
+        else:
+            # Never invent an exit price. The achieved milestone is still retained.
+            exit_price = None
+            realised_r = float(signal.get("realised_r", 0) or 0)
+
+        now = _now()
+        signal.update({
+            "status": "MANUAL_WIN",
+            "completed_at": now,
+            "updated_at": now,
+            "manual_close": True,
+            "manual_close_after_tp": reached,
+            "manual_exit_price": exit_price,
+            "realised_r": realised_r,
+            "result_r": realised_r,
+        })
+        _add_signal_event_locked(
+            signal_id,
+            "MANUAL_WIN",
+            f"User manually closed after TP{reached}. Recorded as a target-achievement win; realised result {realised_r:+.2f}R.",
+            {
+                "closed_after_tp": reached,
+                "exit_price": exit_price,
+                "realised_r": realised_r,
+                "exit_price_source": "last monitored closed-candle price" if exit_price is not None else "unavailable",
+            },
+        )
+        _save()
+        return dict(signal)
 
 
 def get_signal_events(signal_id=None, user_id=None):
