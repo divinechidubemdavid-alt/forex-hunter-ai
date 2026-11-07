@@ -23,7 +23,7 @@ from telegram.ext import (
 
 import state
 from config import MARKETS
-from market_scope import get_strong_signal_markets
+from market_scope import get_strong_signal_markets, get_session_name, is_market_allowed
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
@@ -67,13 +67,13 @@ def _user_id(update):
     return str(update.effective_user.id)
 
 
-def _market_keyboard():
+def _market_keyboard(markets):
     rows = []
 
-    for start in range(0, len(MARKET_NAMES), 2):
+    for start in range(0, len(markets), 2):
         row = []
 
-        for market in MARKET_NAMES[start:start + 2]:
+        for market in markets[start:start + 2]:
             row.append(
                 InlineKeyboardButton(
                     market,
@@ -176,9 +176,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_market_scanner(update, context):
+    now = datetime.now(WAT)
+    session = get_session_name(now.weekday())
+    available_markets = get_strong_signal_markets(MARKETS, now.weekday())
+
+    if session == "weekend":
+        heading = (
+            "🔎 WEEKEND MARKET ANALYSIS\n\n"
+            "Bitcoin (BTC/USD) is the only enabled weekend market. "
+            "Choose it below to select a timeframe."
+        )
+    else:
+        heading = (
+            "🔎 WEEKDAY MARKET ANALYSIS\n\n"
+            "Choose a supported forex pair or Gold (XAU/USD) to analyse."
+        )
+
     await update.message.reply_text(
-        "🔎 MARKET SCANNER\n\nChoose a market to analyse:",
-        reply_markup=_market_keyboard(),
+        heading,
+        reply_markup=_market_keyboard(available_markets),
     )
 
 
@@ -206,14 +222,14 @@ async def _fetch_strong_market_frame(symbol):
 async def _refresh_strong_signal_snapshot():
     """Refresh eligible markets and return current strong setups.
 
-    Weekends are BTC/USD-only. Weekdays check every configured market.
+    Weekends are BTC/USD-only. Weekdays check configured forex pairs and Gold only.
     Snapshots are scoped separately so weekday forex opportunities cannot
     appear in a weekend Strong Signals view.
     """
     now = datetime.now(WAT)
     weekend_only = now.weekday() >= 5
     scan_markets = get_strong_signal_markets(MARKETS, now.weekday())
-    market_scope = "weekend_btc_only" if weekend_only else "weekday_all_markets"
+    market_scope = "weekend_btc_only" if weekend_only else "weekday_forex_gold"
 
     saved = state.get_scanner_state("strong_signals_snapshot", {}) or {}
     saved_at = saved.get("updated_at")
@@ -307,7 +323,7 @@ async def show_strong_signals(update, context):
     market_scope_text = (
         "BTC/USD only (weekend mode)"
         if len(scan_markets) == 1 and scan_markets[0] == "BTC/USD"
-        else "all configured markets (weekday mode)"
+        else "configured forex pairs and Gold (weekday mode)"
     )
     await update.message.reply_text(
         "🔄 Refreshing Strong Signals across "
@@ -813,6 +829,13 @@ async def analyse_market(update, context, symbol, timeframe):
     if symbol not in MARKETS:
         await update.callback_query.edit_message_text(
             "That market is not configured."
+        )
+        return
+
+    if not is_market_allowed(symbol, datetime.now(WAT).weekday()):
+        await update.callback_query.edit_message_text(
+            "That market is not available in the current trading session. "
+            "Please reopen Market Scanner to see the currently enabled markets."
         )
         return
 
