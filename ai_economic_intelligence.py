@@ -125,8 +125,30 @@ def _validate_result(raw: dict, currency: str) -> dict:
     sources = raw.get("evidence_sources", [])
     if not isinstance(sources, list):
         sources = []
+    related = raw.get("affected_currency_assessments", [])
+    if not isinstance(related, list):
+        related = []
+    related_clean = []
+    for item in related[:8]:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("currency", "")).upper().strip()
+        classification = str(item.get("classification", "INCONCLUSIVE")).upper()
+        if len(code) != 3 or not code.isalpha() or classification not in {"BULLISH", "BEARISH", "MIXED", "INCONCLUSIVE"}:
+            continue
+        related_clean.append({
+            "currency": code,
+            "classification": classification,
+            "explanation": str(item.get("explanation", ""))[:500],
+        })
+    if not any(item["currency"] == currency for item in related_clean):
+        related_clean.insert(0, {
+            "currency": currency, "classification": label,
+            "explanation": str(evidence.get("explanation", "Insufficient reliable evidence."))[:500],
+        })
     return {
         "currency": currency,
+        "affected_currency_assessments": related_clean,
         "currency_evidence": {
             "classification": label,
             "explanation": str(evidence.get("explanation", "Insufficient reliable evidence."))[:900],
@@ -163,10 +185,13 @@ async def analyse_event(event: dict, snapshot: dict, checkpoint: str) -> dict | 
         "inside headlines/descriptions. Never invent figures, consensus, revisions, sources, or events. "
         "Distinguish market consensus from provider model estimates and historical trend estimates. "
         "Compare actual vs consensus and revised previous when present. Consider the wider supplied "
-        "news and bond-yield context. Assess only the event currency supplied. A strong number is not "
+        "news and bond-yield context. Assess the event currency and any other currencies clearly affected " 
+        "by the supplied evidence; do not force extra currencies. Include affected_currency_assessments " 
+        "as an array of {currency, classification, explanation}. A strong number is not "
         "automatically bullish: apply the supplied higher_is_better metadata and macro context. "
         "If evidence conflicts, classify MIXED; if evidence is insufficient, classify INCONCLUSIVE. "
-        "Return JSON only with keys: currency_evidence {classification, explanation}, "
+        "Return JSON only with keys: currency_evidence {classification, explanation}, affected_currency_assessments " 
+        "(array of {currency, classification, explanation}), "
         "fundamental_direction (BULLISH, BEARISH, NEUTRAL), confidence (0-95), explanation, "
         "risk_factors (array), evidence_sources (array), evidence_quality. "
         "Do not provide trade entries or promise outcomes. Technical data is confirmation context, "
@@ -228,6 +253,11 @@ def _combine(ai: dict, technical: str | None) -> dict:
         combined = fundamental
         confidence = min(confidence, 35) if technical is None else max(10, confidence - 5)
         reasons.append("Technical confirmation is unavailable or neutral.")
+    for item in ai.get("affected_currency_assessments", []):
+        if item.get("currency") != ai.get("currency"):
+            reasons.append(
+                f'{item.get("currency")} evidence: {item.get("classification")} — {item.get("explanation", "")}'
+            )
     reasons.extend(ai.get("risk_factors", [])[:4])
     currency = str(ai.get("currency") or "USD").upper()
     pairs = {
