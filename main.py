@@ -7,7 +7,7 @@ from telegram.ext import Application
 from config import TELEGRAM_BOT_TOKEN
 from bot import register_handlers
 from auto_scanner import auto_scan_loop
-from signal_monitor import monitor_signals_loop
+from signal_monitor import monitor_signals_loop\nfrom economic_events_bot import economic_events_loop
 
 
 logging.basicConfig(
