@@ -75,7 +75,7 @@ def list_events(include_past=False, limit=30, user_id=None):
     now = _now()
     rows = [e for e in events
             if (include_past or _parse_dt(e["scheduled_at"]) >= now - timedelta(hours=2))
-            and (e.get("owner_id") is None or str(e.get("owner_id")) == str(user_id))]
+            and (user_id == "*" or e.get("owner_id") is None or str(e.get("owner_id")) == str(user_id))]
     return sorted(rows, key=lambda e: e["scheduled_at"])[:max(1, int(limit))]
 
 
