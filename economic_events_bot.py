@@ -178,16 +178,17 @@ async def handle_event_text(update, context):
                 raise ValueError("Please send all six fields separated by |.")
             date_text, currency, title, forecast, previous, higher = parts
             when = datetime.strptime(date_text, "%Y-%m-%d %H:%M").replace(tzinfo=WAT)
+            if higher.lower() in {"yes", "y", "true", "1"}:
+                higher_is_better = True
+            elif higher.lower() in {"no", "n", "false", "0"}:
+                higher_is_better = False
+            else:
+                raise ValueError("Higher-is-better must be yes or no.")
             event = ee.create_event(
                 title, when, currency=currency, forecast=None if forecast == "-" else forecast,
                 previous=None if previous == "-" else previous, owner_id=user_id,
             )
-            if higher.lower() in {"yes", "y", "true", "1"}:
-                event["higher_is_better"] = True
-            elif higher.lower() in {"no", "n", "false", "0"}:
-                event["higher_is_better"] = False
-            else:
-                raise ValueError("Higher-is-better must be yes or no.")
+            event["higher_is_better"] = higher_is_better
             ee.save_event(event)
             context.user_data.pop("econ_awaiting", None)
             await update.message.reply_text("✅ Personal event saved. Only your account will receive its alerts.")
@@ -276,6 +277,8 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
     recipients = [event["owner_id"]] if event.get("owner_id") else state.get_users()
     for user_id in recipients:
         try:
+            if hasattr(photo, "seek"):
+                photo.seek(0)
             await application.bot.send_photo(chat_id=int(user_id), photo=photo, caption=text[:1020])
         except Exception:
             log.exception("Could not deliver economic event alert to user %s", user_id)
