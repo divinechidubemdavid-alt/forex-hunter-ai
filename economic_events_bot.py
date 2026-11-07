@@ -323,6 +323,22 @@ async def economic_events_loop(application):
                             event = ee.get_event(event["id"]) or event
                             attempts = event.setdefault("post_release_attempts", [])
                 for checkpoint in ee.due_checkpoints(event, now):
+                    if checkpoint in {"24h", "1h"} and event.get("forecast") is None:
+                        checked = event.setdefault("model_forecast_attempts", [])
+                        if checkpoint not in checked:
+                            checked.append(checkpoint)
+                            ee.save_event(event)
+                            try:
+                                model = await research.fetch_bls_model_forecast(event)
+                                if model:
+                                    event["forecast"] = str(model["forecast"])
+                                    event["previous"] = str(model["previous"])
+                                    event["higher_is_better"] = model["higher_is_better"]
+                                    event["forecast_type"] = model["forecast_type"]
+                                    event["forecast_source"] = model["forecast_source"]
+                                    ee.save_event(event)
+                            except Exception:
+                                log.exception("BLS model baseline could not be prepared")
                     snapshot = await research.technical_snapshot(event, checkpoint)
                     frame = snapshot.pop("_frame", None)
                     market_chart = None
