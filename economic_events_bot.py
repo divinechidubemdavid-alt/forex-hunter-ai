@@ -250,12 +250,18 @@ async def _attempt_official_actual(event):
     if result.get("previous_value") is not None:
         event["previous"] = str(result["previous_value"])
     ee.save_event(event)
-    return ee.record_actual(
+    report = ee.record_actual(
         event["id"], str(result["value"]),
-        revised_previous=result.get("revised_previous"),
         notes="Automatically retrieved from the configured economic data source.",
         details=result,
     )
+    if result.get("revised_previous") is not None:
+        saved = ee.get_event(event["id"])
+        report["revised_previous"] = result["revised_previous"]
+        saved["post_event_report"] = report
+        saved.setdefault("history", []).append({"provider_revision": result["revised_previous"]})
+        ee.save_event(saved)
+    return report
 
 
 async def _send_event_alert(application, event, checkpoint, record, market_chart=None):
