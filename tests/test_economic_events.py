@@ -50,6 +50,14 @@ class EconomicEventTests(unittest.TestCase):
         self.assertTrue(ee.is_high_impact("US Consumer Price Index"))
         self.assertFalse(ee.is_high_impact("Minor regional business survey"))
 
+    def test_post_event_direction_compares_actual_to_forecast(self):
+        item = self.event(forecast="3.4", previous="3.2")
+        item["higher_is_better"] = True
+        ee.save_event(item)
+        report = ee.record_actual(item["id"], "3.1")
+        self.assertEqual(report["analysis"]["direction"], "BEARISH")
+        self.assertIn("forecast", report["analysis"]["reasons"][0])
+
 
 if __name__ == "__main__":
     unittest.main()
