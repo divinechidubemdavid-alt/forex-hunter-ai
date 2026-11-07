@@ -8,8 +8,14 @@ import economic_events as ee
 class EconomicEventTests(unittest.TestCase):
     def setUp(self):
         self.store = []
-        self.patcher = patch.object(ee.state, "get_scanner_state", side_effect=lambda key, default=None: self.store if key == "economic_events" else default)
-        self.setter = patch.object(ee.state, "set_scanner_state", side_effect=lambda key, value: self.store.__setitem__(slice(None), value) if key == "economic_events" else None)
+        self.patcher = patch.object(
+            ee.state, "get_scanner_state",
+            side_effect=lambda key, default=None: self.store if key == "economic_events" else default,
+        )
+        self.setter = patch.object(
+            ee.state, "set_scanner_state",
+            side_effect=lambda key, value: self.store.__setitem__(slice(None), value) if key == "economic_events" else None,
+        )
         self.patcher.start()
         self.setter.start()
         self.addCleanup(self.patcher.stop)
@@ -23,22 +29,36 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(ee.get_event(item["id"])["title"], "US CPI")
         self.assertEqual(len(ee.list_events()), 1)
 
+    def test_private_events_are_scoped_to_owner(self):
+        own = self.event(owner_id="100")
+        other = self.event(owner_id="200")
+        global_event = self.event()
+        self.assertEqual({e["id"] for e in ee.list_events(user_id="100")}, {own["id"], global_event["id"]})
+        self.assertEqual({e["id"] for e in ee.list_events(user_id="200")}, {other["id"], global_event["id"]})
+        self.assertEqual(len(ee.list_events(user_id="*")), 3)
+
     def test_no_fabricated_direction_without_preference_metadata(self):
         item = self.event(forecast="3.1", previous="3.2")
         self.assertEqual(ee.directional_analysis(item)["direction"], "NEUTRAL")
 
     def test_5m_preserves_15m_forecast_without_material_change(self):
         item = self.event(forecast="3.1", previous="3.2")
-        baseline = ee.record_checkpoint(item["id"], "15m", technical="BULLISH")
-        verified = ee.record_checkpoint(item["id"], "5m", technical="BEARISH")
+        baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
+        current_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 27, "breakout": "NONE", "volatility_pct": 0.21}
+        baseline = ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
+        verified = ee.record_checkpoint(item["id"], "5m", technical="BULLISH", technical_snapshot=current_snapshot)
         self.assertEqual(verified["verification"], "CONFIRMED_UNCHANGED")
         self.assertEqual(verified["analysis"], baseline["analysis"])
 
-    def test_5m_flags_material_change_for_review(self):
+    def test_5m_revises_only_after_material_market_change(self):
         item = self.event(forecast="3.1", previous="3.2")
-        ee.record_checkpoint(item["id"], "15m")
-        verified = ee.record_checkpoint(item["id"], "5m", evidence_note="Official release schedule revised.")
-        self.assertEqual(verified["verification"], "REVIEW_REQUIRED")
+        baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
+        changed_snapshot = {"status": "AVAILABLE", "direction": "BEARISH", "adx": 35, "breakout": "DOWNSIDE_BREAKOUT", "volatility_pct": 0.5}
+        ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
+        verified = ee.record_checkpoint(item["id"], "5m", technical="BEARISH", technical_snapshot=changed_snapshot)
+        self.assertEqual(verified["verification"], "DIRECTION_REVIEWED")
+        self.assertEqual(verified["prior_analysis"]["technical_direction"], "BULLISH")
+        self.assertEqual(verified["analysis"]["technical_direction"], "BEARISH")
 
     def test_post_event_report_saved_with_actual_forecast_previous(self):
         item = self.event(forecast="3.1", previous="3.2")
@@ -57,6 +77,14 @@ class EconomicEventTests(unittest.TestCase):
         report = ee.record_actual(item["id"], "3.1")
         self.assertEqual(report["analysis"]["direction"], "BEARISH")
         self.assertIn("forecast", report["analysis"]["reasons"][0])
+
+    def test_usd_pair_biases_are_inverted_correctly(self):
+        item = self.event(forecast="3.4", previous="3.2")
+        item["higher_is_better"] = True
+        analysis = ee.directional_analysis(item)
+        self.assertEqual(analysis["market_biases"]["EUR/USD"], "SELL")
+        self.assertEqual(analysis["market_biases"]["USD/JPY"], "BUY")
+        self.assertEqual(analysis["market_biases"]["XAU/USD"], "SELL")
 
 
 if __name__ == "__main__":
