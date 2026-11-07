@@ -127,7 +127,13 @@ async def handle_event_callback(update, context):
                 f'Previous: {report.get("previous") or "N/A"}\n'
                 f'Source: {report.get("actual_details", {}).get("source", "user supplied")}\n'
                 f'Direction: {analysis["direction"]} | Confidence: {analysis["confidence"]}/100\n'
-                + "\n".join("• " + x for x in analysis["reasons"])
+                f'Forecast score: {report.get("forecast_score", "UNSCORED")}\n'
+                + "\n".join(
+                    f'Market reaction +{item["minutes_after"]}m: {item["market"]} {item["direction"]} '
+                    f'(ADX {item.get("adx")}, RSI {item.get("rsi")})'
+                    for item in report.get("market_reactions", [])
+                )
+                + "\n" + "\n".join("• " + x for x in analysis["reasons"])
             )
             await query.message.reply_photo(photo=photo, caption=caption[:1020])
             return
