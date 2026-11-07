@@ -208,8 +208,41 @@ def record_actual(event_id, actual, revised_previous=None, notes="", details=Non
         "actual_details": details or {},
         "analysis": directional_analysis(event, phase="post-event"),
     }
+    report["forecast_score"] = "AWAITING_MARKET_REACTION" if report["analysis"]["direction"] in {"BULLISH", "BEARISH"} else "UNSCORED"
     event["post_event_report"] = report
     event.setdefault("history", []).append({"post_event_report": report})
+    save_event(event)
+    return report
+
+
+def record_market_reaction(event_id, snapshot, minutes_after):
+    event = get_event(event_id)
+    if not event or not event.get("post_event_report"):
+        raise KeyError("Post-event report not found.")
+    report = event["post_event_report"]
+    reaction = {
+        "minutes_after": int(minutes_after),
+        "observed_at": _now().isoformat(),
+        "market": snapshot.get("market"),
+        "direction": snapshot.get("currency_direction", "UNAVAILABLE"),
+        "pair_direction": snapshot.get("direction", "UNAVAILABLE"),
+        "adx": snapshot.get("adx"),
+        "rsi": snapshot.get("rsi"),
+        "volatility_pct": snapshot.get("volatility_pct"),
+        "breakout": snapshot.get("breakout"),
+        "source": snapshot.get("source", "unavailable"),
+    }
+    report.setdefault("market_reactions", []).append(reaction)
+    fundamental = report.get("analysis", {}).get("direction")
+    observed = reaction["direction"]
+    if fundamental in {"BULLISH", "BEARISH"} and observed in {"BULLISH", "BEARISH"}:
+        report["forecast_score"] = "ALIGNED" if fundamental == observed else "NOT_ALIGNED"
+        report["forecast_score_value"] = 1 if fundamental == observed else 0
+    else:
+        report["forecast_score"] = "UNSCORED"
+        report["forecast_score_value"] = None
+    event["post_event_report"] = report
+    event.setdefault("history", []).append({"market_reaction": reaction, "forecast_score": report["forecast_score"]})
     save_event(event)
     return report
 
