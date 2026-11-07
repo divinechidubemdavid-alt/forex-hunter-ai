@@ -150,7 +150,7 @@ class EconomicEventTests(unittest.TestCase):
         changed_snapshot = {"status": "AVAILABLE", "direction": "BEARISH", "adx": 35, "breakout": "DOWNSIDE_BREAKOUT", "volatility_pct": 0.5}
         ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
         verified = ee.record_checkpoint(item["id"], "5m", technical="BEARISH", technical_snapshot=changed_snapshot)
-        self.assertEqual(verified["verification"], "DIRECTION_REVIEWED")
+        self.assertEqual(verified["verification"], "DIRECTION_REVISED")
         self.assertEqual(verified["prior_analysis"]["technical_direction"], "BULLISH")
         self.assertEqual(verified["analysis"]["technical_direction"], "BEARISH")
 
