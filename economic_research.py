@@ -29,7 +29,7 @@ def _event_kind(title: str) -> str | None:
     t = title.lower()
     if "employment situation" in t or "nonfarm" in t or "payroll" in t:
         return "payroll"
-    if "unemployment" in t:
+    if "unemployment rate" in t:
         return "unemployment"
     if "consumer price" in t or "cpi" in t:
         return "cpi"
