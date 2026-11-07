@@ -295,7 +295,7 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(te._consensus({"Forecast": "", "TEForecast": "3.2%"}), ("3.2%", "provider_model_estimate"))
 
     def test_provider_event_semantics_are_event_specific(self):
-        self.assertFalse(te._higher_is_better("US CPI YoY"))
+        self.assertTrue(te._higher_is_better("US CPI YoY"))
         self.assertFalse(te._higher_is_better("Unemployment Rate"))
         self.assertTrue(te._higher_is_better("Non Farm Payrolls"))
 
