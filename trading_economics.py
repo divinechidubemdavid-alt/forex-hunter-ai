@@ -112,7 +112,11 @@ async def fetch_calendar_events(days_ahead: int = 30) -> list[dict]:
         country = str(row.get("Country") or "").strip()
         currency = COUNTRY_CURRENCY.get(country.lower())
         title = str(row.get("Event") or row.get("Category") or "").strip()
-        if not currency or not title or not ee.is_high_impact(title):
+        try:
+            importance = int(row.get("Importance") or 0)
+        except (TypeError, ValueError):
+            importance = 0
+        if not currency or not title or importance != 3:
             continue
         try:
             when = _dt(row["Date"])
