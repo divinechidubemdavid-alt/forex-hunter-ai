@@ -224,6 +224,8 @@ async def _attempt_official_actual(event):
     event = ee.get_event(event["id"])
     event["actual_details"] = result
     event["higher_is_better"] = result.get("higher_is_better")
+    if event.get("forecast") is None and result.get("previous_value") is not None:
+        event["previous"] = str(result["previous_value"])
     ee.save_event(event)
     return ee.record_actual(
         event["id"], str(result["value"]), notes="Automatically retrieved from the official BLS API.",
