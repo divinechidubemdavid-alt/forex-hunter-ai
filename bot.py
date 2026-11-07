@@ -199,12 +199,20 @@ async def _fetch_strong_market_frame(symbol):
 
 
 async def _refresh_strong_signal_snapshot():
-    """Refresh all configured markets and return every currently strong setup.
+    """Refresh eligible markets and return current strong setups.
 
-    A shared 15-minute snapshot matches the 15-minute closed-candle strategy
-    and prevents repeated button taps from consuming more API requests. Market data itself is cached by market_data.
+    Weekends are BTC/USD-only. Weekdays check every configured market.
+    Snapshots are scoped separately so weekday forex opportunities cannot
+    appear in a weekend Strong Signals view.
     """
     now = datetime.now(WAT)
+    weekend_only = now.weekday() >= 5
+    scan_markets = (
+        ["BTC/USD"] if weekend_only and "BTC/USD" in MARKETS
+        else ([] if weekend_only else list(MARKETS))
+    )
+    market_scope = "weekend_btc_only" if weekend_only else "weekday_all_markets"
+
     saved = state.get_scanner_state("strong_signals_snapshot", {}) or {}
     saved_at = saved.get("updated_at")
     try:
@@ -214,14 +222,19 @@ async def _refresh_strong_signal_snapshot():
     except (TypeError, ValueError):
         saved_time = None
 
-    if saved_time and (now - saved_time).total_seconds() < 15 * 60:
+    if (
+        saved_time
+        and saved.get("market_scope") == market_scope
+        and (now - saved_time).total_seconds() < 15 * 60
+    ):
+        cached_items = [
+            item for item in (
+                state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
+            )
+            if item and item.get("symbol") in scan_markets
+        ]
         return (
-            [
-                item for item in (
-                    state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
-                )
-                if item
-            ],
+            cached_items,
             saved_time,
             True,
             int(saved.get("markets_checked", 0)),
@@ -231,7 +244,7 @@ async def _refresh_strong_signal_snapshot():
     strong = []
     errors = []
     markets_checked = 0
-    for symbol in MARKETS:
+    for symbol in scan_markets:
         try:
             frame = await _fetch_strong_market_frame(symbol)
             markets_checked += 1
@@ -278,6 +291,7 @@ async def _refresh_strong_signal_snapshot():
     snapshot_time = datetime.now(WAT)
     state.set_scanner_state("strong_signals_snapshot", {
         "updated_at": snapshot_time.isoformat(),
+        "market_scope": market_scope,
         "opportunity_ids": [str(item["id"]) for item in strong],
         "markets_checked": markets_checked,
         "errors": errors,
@@ -337,7 +351,7 @@ async def show_strong_signals(update, context):
     await update.message.reply_text(
         f"🔥 STRONG SIGNALS — {label}\n"
         f"Last scan: {refreshed_at.strftime('%d %b %Y, %H:%M:%S')} WAT\n"
-        f"Markets checked successfully: {markets_checked}/{len(MARKETS)}\n"
+        f"Markets checked successfully: {markets_checked}/{len(scan_markets)}\n"
         f"Qualifying fresh setups: {len(strong)}\n\n"
         "Only current qualifying opportunities are shown. "
         "Track a signal to monitor its TP/SL progress.",
