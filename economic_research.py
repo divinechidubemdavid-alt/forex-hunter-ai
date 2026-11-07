@@ -46,6 +46,76 @@ def _period_key(row):
     except (KeyError, TypeError, ValueError):
         return None
 
+
+async def fetch_bls_model_forecast(event: dict) -> dict | None:
+    """Create a clearly labelled trend baseline from recent official BLS observations."""
+    kind = _event_kind(event.get("title", ""))
+    if not kind:
+        return None
+    now = datetime.now(timezone.utc)
+    payload = {
+        "seriesid": [BLS_SERIES[kind]],
+        "startyear": str(now.year - 2),
+        "endyear": str(now.year),
+    }
+    async with httpx.AsyncClient(timeout=25) as client:
+        response = await client.post(BLS_API, json=payload)
+        response.raise_for_status()
+        body = response.json()
+    if body.get("status") != "REQUEST_SUCCEEDED":
+        return None
+    series = body.get("Results", {}).get("series", [])
+    if not series:
+        return None
+    rows = [row for row in series[0].get("data", []) if _period_key(row)]
+    rows.sort(key=_period_key)
+    values = { _period_key(row): float(row["value"].replace(",", "")) for row in rows }
+    periods = sorted(values)
+    if kind == "unemployment":
+        rates = [values[p] for p in periods[-3:]]
+        if len(rates) < 3:
+            return None
+        previous = rates[-1]
+        forecast = sum(rates) / len(rates)
+        label = "Unemployment rate (%)"
+        higher_is_better = False
+    elif kind == "cpi":
+        yoy = []
+        for year, month in periods:
+            prior = (year - 1, month)
+            if prior in values:
+                yoy.append((year, month, (values[(year, month)] / values[prior] - 1) * 100))
+        if len(yoy) < 3:
+            return None
+        previous = yoy[-1][2]
+        forecast = sum(item[2] for item in yoy[-3:]) / 3
+        label = "CPI year-over-year change (%)"
+        higher_is_better = False
+    else:
+        changes = []
+        for index in range(1, len(periods)):
+            old = values[periods[index - 1]]
+            new = values[periods[index]]
+            if kind == "payroll":
+                changes.append(new - old)
+            elif old:
+                changes.append((new / old - 1) * 100)
+        if len(changes) < 3:
+            return None
+        previous = changes[-1]
+        forecast = sum(changes[-3:]) / 3
+        label = "Monthly nonfarm payroll change (thousands)" if kind == "payroll" else "Average hourly earnings monthly change (%)"
+        higher_is_better = True
+    return {
+        "forecast": round(forecast, 4),
+        "previous": round(previous, 4),
+        "label": label,
+        "forecast_type": "model_estimate",
+        "forecast_source": "BLS official historical data; trailing three-release average",
+        "higher_is_better": higher_is_better,
+        "source_url": "https://www.bls.gov/developers/",
+    }
+
 async def fetch_bls_release_actual(event: dict) -> dict | None:
     """Fetch one batch of official BLS series and return only a matching release."""
     kind = _event_kind(event.get("title", ""))
