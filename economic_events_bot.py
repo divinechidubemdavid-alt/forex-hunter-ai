@@ -153,7 +153,9 @@ async def handle_event_callback(update, context):
                 f'Actual: {report["actual"]} | Forecast: {report.get("forecast") or "N/A"} | '
                 f'Previous: {report.get("previous") or "N/A"}\n'
                 f'Source: {report.get("actual_details", {}).get("source", "user supplied")}\n'
-                f'Direction: {analysis["direction"]} | Confidence: {analysis["confidence"]}/100\n'
+                f'Fundamental: {analysis.get("fundamental_direction", analysis["direction"])} | '
+                f'Combined: {analysis.get("combined_direction", analysis["direction"])} | '
+                f'Confidence: {analysis["confidence"]}/100\n'
                 f'Forecast score: {report.get("forecast_score", "UNSCORED")}\n'
                 + "\n".join(
                     f'Market reaction +{item["minutes_after"]}m: {item["market"]} {item["direction"]} '
@@ -183,7 +185,9 @@ async def handle_event_callback(update, context):
         )
         caption = (
             _event_text(event) + "\n\n"
-            f'CURRENT FUNDAMENTAL BIAS: {analysis["direction"]} '
+            f'FUNDAMENTAL BIAS: {analysis.get("fundamental_direction", analysis["direction"])}\n'
+            f'TECHNICAL BIAS: {analysis.get("technical_direction", "NOT PROVIDED")}\n'
+            f'COMBINED DIRECTION: {analysis.get("combined_direction", analysis["direction"])} '
             f'({analysis["confidence"]}/100)\n'
             + "\n".join("• " + x for x in analysis["reasons"])
             + "\n\nAFFECTED PAIR BIASES:\n"
@@ -321,7 +325,9 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f'{event["title"]}\nEvent time: {scheduled:%d %b %Y, %H:%M} WAT\n'
         f'Currency: {event.get("currency", "USD")}\n'
         f'Forecast: {event.get("forecast") or "Not supplied"} | Previous: {event.get("previous") or "Not supplied"}\n\n'
-        f'Fundamental direction: {analysis["direction"]} | Confidence: {analysis["confidence"]}/100\n'
+        f'Fundamental direction: {analysis.get("fundamental_direction", analysis["direction"])}\n'
+        f'Technical direction: {analysis.get("technical_direction", "NOT PROVIDED")}\n'
+        f'Combined forecast: {analysis.get("combined_direction", analysis["direction"])} | Confidence: {analysis["confidence"]}/100\n'
         f'Technical: {technical_text}\n\nAffected market bias:\n{market_lines}\n\n'
         + "\n".join("• " + reason for reason in analysis["reasons"])
         + ("\n\nLATEST ECONOMIC NEWS:\n" + news_lines if news_lines else "")
