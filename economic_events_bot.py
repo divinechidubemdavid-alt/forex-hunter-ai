@@ -10,6 +10,7 @@ from telegram.ext import CommandHandler
 from chart import create_market_chart
 import economic_events as ee
 import economic_research as research
+import trading_economics as te
 import state
 
 log = logging.getLogger(__name__)
@@ -24,6 +25,18 @@ def event_center_keyboard():
          InlineKeyboardButton("🗂 Event history", callback_data="econ:history")],
         [InlineKeyboardButton("🔄 Sync official calendar", callback_data="econ:import")],
     ])
+
+
+async def _sync_calendars():
+    if te.configured():
+        try:
+            return len(await te.fetch_calendar_events()), "Trading Economics global calendar"
+        except Exception:
+            log.exception("Licensed global calendar sync failed; using official-source fallback")
+    imported = await ee.fetch_ics_events()
+    fomc = await ee.fetch_fomc_events()
+    bea = await ee.fetch_bea_events()
+    return len(imported) + len(fomc) + len(bea), "official BLS, Federal Reserve and BEA calendars"
 
 
 def _event_text(event):
@@ -90,13 +103,10 @@ async def handle_event_callback(update, context):
         await _show_list(query.message.chat, True, user_id)
     elif data == "econ:import":
         try:
-            imported = await ee.fetch_ics_events()
-            fomc = await ee.fetch_fomc_events()
-            bea = await ee.fetch_bea_events()
-            total = len(imported) + len(fomc) + len(bea)
+            total, source = await _sync_calendars()
             await query.message.reply_text(
-                f"Official BLS, Federal Reserve and BEA calendar sync complete: {total} new high-impact event(s)."
-                if total else "Official calendars are up to date; no new high-impact events were added."
+                f"{source} sync complete: {total} new high-impact event(s)."
+                if total else f"{source} is up to date; no new high-impact events were added."
             )
         except Exception as exc:
             log.exception("Official calendar import failed")
@@ -299,9 +309,7 @@ async def economic_events_loop(application):
             now = datetime.now(timezone.utc)
             if now.timestamp() - last_import >= 6 * 3600:
                 try:
-                    await ee.fetch_ics_events()
-                    await ee.fetch_fomc_events()
-                    await ee.fetch_bea_events()
+                    await _sync_calendars()
                 except Exception:
                     log.exception("Official economic calendar sync failed")
                 last_import = now.timestamp()
