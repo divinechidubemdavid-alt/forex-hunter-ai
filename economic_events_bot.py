@@ -435,23 +435,7 @@ async def economic_events_loop(application):
                             event = ee.get_event(event["id"]) or event
                             attempts = event.setdefault("post_release_attempts", [])
                 for checkpoint in ee.due_checkpoints(event, now):
-                    if checkpoint in {"24h", "1h"} and event.get("forecast") is None:
-                        checked = event.setdefault("model_forecast_attempts", [])
-                        if checkpoint not in checked:
-                            checked.append(checkpoint)
-                            ee.save_event(event)
-                            try:
-                                model = await research.fetch_bls_model_forecast(event)
-                                if model:
-                                    event["forecast"] = str(model["forecast"])
-                                    event["previous"] = str(model["previous"])
-                                    event["higher_is_better"] = model["higher_is_better"]
-                                    event["forecast_type"] = model["forecast_type"]
-                                    event["forecast_source"] = model["forecast_source"]
-                                    ee.save_event(event)
-                            except Exception:
-                                log.exception("BLS model baseline could not be prepared")
-                    if te.configured():
+                    if te.configured() and event.get("provider_calendar_id"):
                         try:
                             event = await _refresh_provider_event(event)
                             news = await te.fetch_event_news(event, limit=3)
@@ -461,10 +445,35 @@ async def economic_events_loop(application):
                                 yields = await te.fetch_bond_yield_context(event)
                                 if yields:
                                     event["bond_yield_context"] = yields
+                            event["provider_context_status"] = "AVAILABLE"
                             event["provider_context_checked_at"] = datetime.now(timezone.utc).isoformat()
                             ee.save_event(event)
                         except Exception:
+                            event["provider_context_status"] = "UNAVAILABLE"
+                            ee.save_event(event)
                             log.exception("Economic event/news/yield refresh unavailable for %s", event.get("title"))
+                    else:
+                        try:
+                            model = await research.fetch_bls_model_forecast(event)
+                            if model:
+                                if event.get("forecast") is None or event.get("forecast_type") == "model_estimate":
+                                    event["forecast"] = str(model["forecast"])
+                                    event["previous"] = str(model["previous"])
+                                    event["higher_is_better"] = model["higher_is_better"]
+                                    event["forecast_type"] = model["forecast_type"]
+                                    event["forecast_source"] = model["forecast_source"]
+                                event["provider_context_status"] = "OFFICIAL_FALLBACK"
+                            else:
+                                event["provider_context_status"] = "NOT_CONFIGURED"
+                            if te.configured() and checkpoint in {"24h", "1h"}:
+                                yields = await te.fetch_bond_yield_context(event)
+                                if yields:
+                                    event["bond_yield_context"] = yields
+                            ee.save_event(event)
+                        except Exception:
+                            event["provider_context_status"] = "UNAVAILABLE"
+                            ee.save_event(event)
+                            log.exception("Official fallback event context unavailable for %s", event.get("title"))
                     event = ee.get_event(event["id"]) or event
                     snapshot = await research.technical_snapshot(event, checkpoint)
                     frame = snapshot.pop("_frame", None)
