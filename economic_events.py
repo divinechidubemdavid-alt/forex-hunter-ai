@@ -232,7 +232,12 @@ def record_actual(event_id, actual, revised_previous=None, notes="", details=Non
         "actual_details": details or {},
         "analysis": directional_analysis(event, phase="post-event"),
     }
-    report["forecast_score"] = "AWAITING_MARKET_REACTION" if report["analysis"]["direction"] in {"BULLISH", "BEARISH"} else "UNSCORED"
+    report["forecast_score"] = (
+        "AWAITING_MARKET_REACTION"
+        if event.get("forecast") is not None and report["analysis"]["direction"] in {"BULLISH", "BEARISH"}
+        else "NO_CONSENSUS_FORECAST" if event.get("forecast") is None
+        else "UNSCORED"
+    )
     event["post_event_report"] = report
     event.setdefault("history", []).append({"post_event_report": report})
     save_event(event)
@@ -260,7 +265,10 @@ def record_market_reaction(event_id, snapshot, minutes_after):
     fundamental = report.get("analysis", {}).get("direction")
     observed = reaction["direction"]
     if fundamental in {"BULLISH", "BEARISH"} and observed in {"BULLISH", "BEARISH"}:
-        report["forecast_score"] = "ALIGNED" if fundamental == observed else "NOT_ALIGNED"
+        if report.get("forecast") is None:
+            report["forecast_score"] = "DIRECTIONAL_ALIGNMENT_ONLY" if fundamental == observed else "DIRECTIONAL_CONFLICT"
+        else:
+            report["forecast_score"] = "ALIGNED" if fundamental == observed else "NOT_ALIGNED"
         report["forecast_score_value"] = 1 if fundamental == observed else 0
     else:
         report["forecast_score"] = "UNSCORED"
