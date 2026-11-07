@@ -77,7 +77,7 @@ def _realised_r(flags, stop_hit=False):
     return earned - remaining_fraction
 
 
-async def _notify(app, user_id, settings, notification_key, message):
+async def _notify(app, user_id, settings, notification_key, message, reply_markup=None):
     """
     Apply the user's tracking-notification mode.
 
@@ -104,7 +104,7 @@ async def _notify(app, user_id, settings, notification_key, message):
         return
 
     try:
-        await app.bot.send_message(chat_id=int(user_id), text=message)
+        await app.bot.send_message(chat_id=int(user_id), text=message, reply_markup=reply_markup)
     except Exception:
         logger.exception(
             "Could not send signal-monitor notification to user %s.",
@@ -245,6 +245,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         return
 
     changed = False
+    milestone_notifications = []
     for index in range(3):
         if newly_hit[index]:
             flags[index] = True
@@ -269,15 +270,11 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
                     "candle_time": str(candle_time),
                 },
             )
-
-            await _notify(
-                app, user_id, settings, f"tp{target_number}",
-                f"🎯 {signal.get('symbol', 'Signal')}: TP{target_number} "
-                f"reached. One-third partial exit recorded. "
-                f"Realised result: {realised:+.2f}R.",
-            )
+            milestone_notifications.append((target_number, realised))
 
     if changed:
+        # Persist target flags before sending action buttons so a fast tap
+        # cannot arrive before the milestone is visible to the callback.
         state.update_signal(signal_id, updates)
         if flags[2]:
             state.complete_signal(
@@ -285,6 +282,33 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
                 "TP3",
                 "TP3 reached. All three one-third partial exits recorded. "
                 "Total realised result: +2.00R.",
+            )
+        latest_milestone = max((number for number, _ in milestone_notifications), default=0)
+        for target_number, realised in milestone_notifications:
+            keyboard = None
+            if target_number == latest_milestone and target_number in (1, 2):
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        f"🔒 Secure profit — close after TP{target_number}",
+                        callback_data=f"manualclose:{signal_id}",
+                    )],
+                    [InlineKeyboardButton(
+                        "▶️ Continue tracking",
+                        callback_data=f"manualcontinue:{signal_id}",
+                    )],
+                ])
+            message = (
+                f"🎯 {signal.get('symbol', 'Signal')}: TP{target_number} reached. "
+                f"One-third partial exit recorded. Realised result: {realised:+.2f}R."
+            )
+            if keyboard:
+                message += (
+                    f"\n\nWould you like to close and record a TP{target_number} "
+                    "milestone win, or continue towards the next target?"
+                )
+            await _notify(
+                app, user_id, settings, f"tp{target_number}",
+                message, reply_markup=keyboard,
             )
     else:
         state.update_signal(signal_id, updates)
@@ -315,8 +339,6 @@ async def _check_trend_warning(app, user_id, signal, frame):
     )
     settings = state.get_user_settings(user_id) or {}
     mode = str(settings.get("tracking_notification_mode", "silent")).lower()
-    if mode not in {"important", "all"}:
-        return
     if mode not in {"important", "all"}:
         return
 
