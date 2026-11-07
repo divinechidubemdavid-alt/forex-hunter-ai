@@ -9,7 +9,7 @@ The main Telegram menu contains **Economic Events**. Its submenu provides upcomi
 ### Calendar and research data sources
 
 - Without a paid data-provider key, the bot imports the official BLS ICS calendar, Federal Reserve FOMC meeting dates and BEA release schedule.
-- An optional Trading Economics adapter provides global high-impact calendars, consensus forecasts, actuals, previous/revised values and country news.
+- An optional Trading Economics adapter provides global high-impact calendars, consensus forecasts, actuals, previous/revised values, country news and 10-year government-bond yield context.
 - The Trading Economics adapter is disabled unless both `TRADING_ECONOMICS_API_KEY` and `TRADING_ECONOMICS_DISTRIBUTION_LICENSED=true` are configured. The latter is an explicit operator attestation that the account's contract permits data distribution to Telegram users. The provider's ordinary Standard plan is single-user; use a contract with redistribution rights (the Enterprise offering advertises data distribution). Never enable the flag without the required rights.
 - With no licensed global provider, the bot uses BLS official actual data and a clearly labelled BLS historical-trend estimate for payrolls, unemployment, CPI and average hourly earnings. It does not invent consensus values.
 
