@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import economic_events as ee
 import trading_economics as te
+import economic_research as er
 
 
 class EconomicEventTests(unittest.TestCase):
@@ -61,6 +62,24 @@ class EconomicEventTests(unittest.TestCase):
         verified = ee.record_checkpoint(item["id"], "5m", technical_snapshot={"status": "UNAVAILABLE", "reason": "provider timeout"})
         self.assertEqual(verified["verification"], "UNAVAILABLE")
         self.assertEqual(verified["analysis"], baseline["analysis"])
+
+    def test_ordinary_ema_flip_with_weak_adx_does_not_revise_forecast(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 18, "breakout": "NONE", "volatility_pct": 0.2}
+        noisy_flip = {"status": "AVAILABLE", "direction": "BEARISH", "adx": 17, "breakout": "NONE", "volatility_pct": 0.21}
+        baseline = ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
+        verified = ee.record_checkpoint(item["id"], "5m", technical="BEARISH", technical_snapshot=noisy_flip)
+        self.assertEqual(verified["verification"], "CONFIRMED_UNCHANGED")
+        self.assertEqual(verified["analysis"], baseline["analysis"])
+
+    def test_material_adx_change_without_direction_flip_is_reviewed_not_revised(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 20, "breakout": "NONE", "volatility_pct": 0.2}
+        stronger_trend = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 30, "breakout": "NONE", "volatility_pct": 0.21}
+        ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
+        verified = ee.record_checkpoint(item["id"], "5m", technical="BULLISH", technical_snapshot=stronger_trend)
+        self.assertEqual(verified["verification"], "REVIEWED_MATERIAL_CHANGE")
+        self.assertEqual(verified["analysis"]["combined_direction"], "BULLISH")
 
     def test_5m_revises_only_after_material_market_change(self):
         item = self.event(forecast="3.1", previous="3.2")
