@@ -55,9 +55,9 @@ def create_performance_report(signals, period_label="All time"):
     signals = list(signals or [])
     eligible = [
         s for s in signals
-        if s.get("status") in {"TP3", "STOP_LOSS"}
+        if s.get("status") in {"TP3", "MANUAL_WIN", "STOP_LOSS"}
     ]
-    wins = sum(s.get("status") == "TP3" for s in eligible)
+    wins = sum(s.get("status") in {"TP3", "MANUAL_WIN"} for s in eligible)
     losses = sum(s.get("status") == "STOP_LOSS" for s in eligible)
     win_rate = (wins / len(eligible) * 100) if eligible else 0.0
     total_r = sum(_realised_r(s) for s in signals
@@ -95,7 +95,7 @@ def create_performance_report(signals, period_label="All time"):
             f"Target achievements     TP1: {tp_counts[0]}     TP2: {tp_counts[1]}     TP3: {tp_counts[2]}",
             transform=ax.transAxes, color=TEXT, fontsize=12)
     ax.text(0.03, 0.08,
-            "Win rate uses TP3 and Stop Loss completions only. Partial R is reported separately.",
+            "Wins include TP3 and manual closes after TP1/TP2; R uses recorded monitored prices.",
             transform=ax.transAxes, color=MUTED, fontsize=9)
     return _finish(fig, "forex_hunter_performance.png")
 
