@@ -91,7 +91,7 @@ async def fetch_bls_model_forecast(event: dict) -> dict | None:
         previous = yoy[-1][2]
         forecast = sum(item[2] for item in yoy[-3:]) / 3
         label = "CPI year-over-year change (%)"
-        higher_is_better = False
+        higher_is_better = True
     else:
         changes = []
         for index in range(1, len(periods)):
