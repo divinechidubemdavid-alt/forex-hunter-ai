@@ -175,15 +175,23 @@ def directional_analysis(event, technical=None, phase="pre-event"):
                 confidence = min(90, confidence + 5)
                 reasons.append("Companion labour indicators support the primary release direction.")
 
+    fundamental_direction = direction
     if technical in ("BULLISH", "BEARISH"):
-        if direction == "NEUTRAL":
-            reasons.append(f"Technical context is {technical}, but event evidence is insufficient.")
-        elif technical == direction:
+        if fundamental_direction == "NEUTRAL":
+            direction = technical
+            confidence = 25
+            reasons.append(
+                f"Fundamental event evidence is insufficient; {technical} is shown as a low-confidence technical-only bias."
+            )
+        elif technical == fundamental_direction:
             confidence = min(85, confidence + 10)
-            reasons.append("Technical context aligns with the event-derived bias.")
+            reasons.append("Technical context aligns with the fundamental event-derived bias.")
         else:
             confidence = max(20, confidence - 15)
-            reasons.append(f"Technical context conflicts ({technical}); confidence reduced, not blocked.")
+            reasons.append(f"Technical context conflicts ({technical}); fundamental direction is retained and confidence reduced, not blocked.")
+    else:
+        direction = fundamental_direction
+    combined_direction = direction
     pairs = {
         "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "XAU/USD"],
         "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
@@ -203,7 +211,10 @@ def directional_analysis(event, technical=None, phase="pre-event"):
             "SELL" if pair_direction == "BEARISH" else "NEUTRAL"
         )
     return {
-        "currency": currency, "direction": direction, "confidence": confidence,
+        "currency": currency, "direction": combined_direction,
+        "fundamental_direction": fundamental_direction,
+        "combined_direction": combined_direction,
+        "confidence": confidence,
         "affected_markets": pairs, "market_biases": market_biases,
         "phase": phase, "basis": "actual" if phase == "post-event" and actual is not None else ("forecast" if forecast is not None else "none"),
         "reasons": reasons, "technical_direction": technical or "NOT PROVIDED",
