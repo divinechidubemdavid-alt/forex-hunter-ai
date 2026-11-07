@@ -23,7 +23,7 @@ CHECKPOINTS = (("24h", timedelta(hours=24)), ("1h", timedelta(hours=1)),
 HIGH_IMPACT_TERMS = (
     "nonfarm", "payroll", "employment situation", "job openings",
     "producer price index", "cpi", "consumer price", "fomc", "federal funds",
-    "interest rate", "unemployment", "pce", "gdp", "retail sales",
+    "interest rate", "unemployment rate", "pce", "gdp", "retail sales",
     "jobless claims", "average hourly earnings", "pmi", "powell",
     "personal income and outlays", "personal consumption expenditures",
 )
@@ -45,6 +45,8 @@ def _parse_dt(value):
 
 def is_high_impact(title):
     text = str(title).lower()
+    if "state employment and unemployment" in text:
+        return False
     return any(term in text for term in HIGH_IMPACT_TERMS)
 
 
