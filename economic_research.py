@@ -16,6 +16,7 @@ import market_data
 import state
 from strategy import calculate_indicators
 
+log = logging.getLogger(__name__)
 BLS_API = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BLS_SERIES = {
     "payroll": "CES0000000001",
@@ -348,5 +349,5 @@ async def auto_actual_release(event: dict) -> dict | None:
                 return result
     except Exception:
         # Do not silently invent or replace an official value; try the supported BLS source.
-        pass
+        log.exception("Trading Economics actual lookup failed; trying BLS fallback")
     return await fetch_bls_release_actual(event)
