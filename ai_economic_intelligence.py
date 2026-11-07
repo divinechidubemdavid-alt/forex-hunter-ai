@@ -251,7 +251,7 @@ def _combine(ai: dict, technical: str | None) -> dict:
             reasons.append("Technical direction conflicts; fundamental direction is retained with reduced confidence.")
     else:
         combined = fundamental
-        confidence = min(confidence, 35) if technical is None else max(10, confidence - 5)
+        confidence = min(confidence, 30) if technical is None else max(10, confidence - 5)
         reasons.append("Technical confirmation is unavailable or neutral.")
     for item in ai.get("affected_currency_assessments", []):
         if item.get("currency") != ai.get("currency"):
