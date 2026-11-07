@@ -24,7 +24,9 @@ COUNTRY_CURRENCY = {
 
 
 def configured() -> bool:
-    return bool(os.getenv("TRADING_ECONOMICS_API_KEY", "").strip())
+    key_present = bool(os.getenv("TRADING_ECONOMICS_API_KEY", "").strip())
+    distribution_allowed = os.getenv("TRADING_ECONOMICS_DISTRIBUTION_LICENSED", "").strip().lower() in {"1", "true", "yes"}
+    return key_present and distribution_allowed
 
 
 def _key() -> str:
