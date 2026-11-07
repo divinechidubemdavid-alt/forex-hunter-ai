@@ -514,5 +514,13 @@ async def economic_events_loop(application):
         await asyncio.sleep(20)
 
 
+async def show_my_telegram_id(update, context):
+    await update.effective_message.reply_text(
+        f"Your Telegram user ID is: {update.effective_user.id}\\n"
+        "Set BOT_OWNER_ID to this value in the host environment only if you need to manually edit shared official event records."
+    )
+
+
 def register_event_handlers(application):
     application.add_handler(CommandHandler("events", show_event_center))
+    application.add_handler(CommandHandler("myid", show_my_telegram_id))
