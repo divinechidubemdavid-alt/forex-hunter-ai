@@ -260,13 +260,29 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
                     record["analysis"] = baseline["analysis"]
                     record["verification"] = "CONFIRMED_UNCHANGED"
                 else:
-                    record["verification"] = "DIRECTION_REVIEWED"
                     record["analysis"] = directional_analysis(
                         event, technical=technical, phase="pre-event"
+                    )
+                    old_direction = baseline["analysis"].get(
+                        "combined_direction", baseline["analysis"].get("direction")
+                    )
+                    new_direction = record["analysis"].get(
+                        "combined_direction", record["analysis"].get("direction")
+                    )
+                    record["verification"] = (
+                        "DIRECTION_REVISED" if new_direction != old_direction
+                        else "REVIEWED_MATERIAL_CHANGE"
                     )
                     record["analysis"]["reasons"].append(
                         "Material 5-minute evidence: " + "; ".join(changes)
                     )
+                    if any("volatility" in item for item in changes):
+                        record["analysis"]["confidence"] = max(
+                            20, record["analysis"]["confidence"] - 10
+                        )
+                        record["analysis"]["reasons"].append(
+                            "Volatility expansion increases event risk; avoid chasing the initial spike."
+                        )
                     record["analysis"]["confidence"] = min(
                         record["analysis"]["confidence"], baseline["analysis"]["confidence"]
                     )
