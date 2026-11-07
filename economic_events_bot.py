@@ -287,7 +287,7 @@ async def economic_events_loop(application):
                 except Exception:
                     log.exception("Official economic calendar sync failed")
                 last_import = now.timestamp()
-            for event in ee.list_events(include_past=False, limit=100):
+            for event in ee.list_events(include_past=False, limit=100, user_id="*"):
                 if event.get("status") == "scheduled" and ee._parse_dt(event["scheduled_at"]) <= now:
                     try:
                         report = await _attempt_official_actual(event)
