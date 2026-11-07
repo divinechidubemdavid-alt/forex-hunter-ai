@@ -34,10 +34,24 @@ async def _sync_calendars():
             return len(await te.fetch_calendar_events()), "Trading Economics global calendar"
         except Exception:
             log.exception("Licensed global calendar sync failed; using official-source fallback")
-    imported = await ee.fetch_ics_events()
-    fomc = await ee.fetch_fomc_events()
-    bea = await ee.fetch_bea_events()
-    return len(imported) + len(fomc) + len(bea), "official BLS, Federal Reserve and BEA calendars"
+    total = 0
+    failures = []
+    for label, importer in (
+        ("BLS", ee.fetch_ics_events),
+        ("Federal Reserve", ee.fetch_fomc_events),
+        ("BEA", ee.fetch_bea_events),
+    ):
+        try:
+            total += len(await importer())
+        except Exception as exc:
+            failures.append(label)
+            log.exception("%s calendar sync failed", label)
+    if failures and total == 0:
+        raise RuntimeError("All official calendar imports failed: " + ", ".join(failures))
+    source = "official BLS, Federal Reserve and BEA calendars"
+    if failures:
+        source += " (partial; failed: " + ", ".join(failures) + ")"
+    return total, source
 
 
 def _event_text(event):
