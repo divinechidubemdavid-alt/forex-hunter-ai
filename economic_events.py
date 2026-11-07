@@ -21,7 +21,8 @@ WAT = ZoneInfo("Africa/Lagos")
 CHECKPOINTS = (("24h", timedelta(hours=24)), ("1h", timedelta(hours=1)),
                ("15m", timedelta(minutes=15)), ("5m", timedelta(minutes=5)))
 HIGH_IMPACT_TERMS = (
-    "nonfarm", "payroll", "cpi", "consumer price", "fomc", "federal funds",
+    "nonfarm", "payroll", "employment situation", "job openings",
+    "producer price index", "cpi", "consumer price", "fomc", "federal funds",
     "interest rate", "unemployment", "pce", "gdp", "retail sales",
     "jobless claims", "average hourly earnings", "pmi", "powell",
     "personal income and outlays", "personal consumption expenditures",
