@@ -103,7 +103,9 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(report["market_reactions"][0]["minutes_after"], 5)
 
     def test_no_consensus_does_not_claim_forecast_score(self):
-        item = self.event()
+        item = self.event(previous="1.1")
+        item["higher_is_better"] = True
+        ee.save_event(item)
         ee.record_actual(item["id"], "1.2")
         report = ee.record_market_reaction(
             item["id"],
