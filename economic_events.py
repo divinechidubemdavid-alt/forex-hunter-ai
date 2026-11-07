@@ -582,9 +582,11 @@ def due_checkpoints(event, now=None):
     now = _parse_dt(now or _now())
     scheduled = _parse_dt(event["scheduled_at"])
     due = []
+    late_windows = {"24h": 30, "1h": 10, "15m": 5, "5m": 2}
     for label, offset in CHECKPOINTS:
         target = scheduled - offset
-        if target <= now < target + timedelta(minutes=1) and label not in event.get("checkpoints", {}):
+        window = timedelta(minutes=late_windows.get(label, 1))
+        if target <= now < min(target + window, scheduled) and label not in event.get("checkpoints", {}):
             due.append(label)
     return due
 
