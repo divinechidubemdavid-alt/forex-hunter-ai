@@ -221,12 +221,13 @@ def record_actual(event_id, actual, revised_previous=None, notes="", details=Non
     if not event:
         raise KeyError("Economic event not found.")
     event["actual"] = actual
+    original_previous = event.get("previous")
     if revised_previous is not None:
         event["previous"] = revised_previous
     event["status"] = "released"
     report = {
         "created_at": _now().isoformat(), "actual": actual,
-        "forecast": event.get("forecast"), "previous": event.get("previous"),
+        "forecast": event.get("forecast"), "previous": original_previous,
         "revised_previous": revised_previous, "notes": str(notes),
         "actual_details": details or {},
         "analysis": directional_analysis(event, phase="post-event"),
