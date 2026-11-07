@@ -50,13 +50,15 @@ def _dt(value: str) -> datetime:
 def _higher_is_better(title: str):
     name = title.lower()
     lower_is_better = (
-        "unemployment", "jobless claims", "initial claims",
+        "unemployment", "jobless claims", "initial claims", "continuing claims", "layoffs",
     )
     higher_is_better = (
         "inflation", "consumer price", "cpi", "pce price", "ppi",
         "non farm payroll", "nonfarm payroll", "employment change",
-        "employment situation", "retail sales", "gdp", "pmi",
-        "hourly earnings", "wage", "consumer confidence", "industrial production",
+        "employment situation", "employment rate", "retail sales", "gdp", "pmi",
+        "hourly earnings", "wage", "consumer confidence", "business confidence",
+        "industrial production", "manufacturing production", "trade balance",
+        "current account", "housing starts", "building permits", "new orders",
         "interest rate decision", "federal funds rate", "policy rate",
     )
     if any(term in name for term in lower_is_better):
