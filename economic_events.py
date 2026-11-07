@@ -186,16 +186,16 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
                     record["analysis"] = baseline["analysis"]
                     record["verification"] = "CONFIRMED_UNCHANGED"
                 else:
-                record["verification"] = "DIRECTION_REVIEWED"
-                record["analysis"] = directional_analysis(
-                    event, technical=technical, phase="pre-event"
-                )
-                record["analysis"]["reasons"].append(
-                    "Material 5-minute evidence: " + "; ".join(changes)
-                )
-                record["analysis"]["confidence"] = min(
-                    record["analysis"]["confidence"], baseline["analysis"]["confidence"]
-                )
+                    record["verification"] = "DIRECTION_REVIEWED"
+                    record["analysis"] = directional_analysis(
+                        event, technical=technical, phase="pre-event"
+                    )
+                    record["analysis"]["reasons"].append(
+                        "Material 5-minute evidence: " + "; ".join(changes)
+                    )
+                    record["analysis"]["confidence"] = min(
+                        record["analysis"]["confidence"], baseline["analysis"]["confidence"]
+                    )
     event.setdefault("checkpoints", {})[checkpoint] = record
     event.setdefault("history", []).append(record)
     save_event(event)
