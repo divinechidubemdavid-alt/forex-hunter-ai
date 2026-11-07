@@ -153,6 +153,21 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(saved["previous"], "175K")
         self.assertEqual(saved["provider_revised_previous"], "170K")
 
+    def test_provider_bond_yield_context_is_currency_specific(self):
+        event = self.event()
+        event["currency"] = "USD"
+        rows = [
+            {"Country": "United States", "Name": "US 10Y", "Last": 4.25,
+             "DailyChange": 0.02, "WeeklyChange": 0.08, "MonthlyChange": 0.1,
+             "Date": "2026-11-07T12:00:00"},
+            {"Country": "United Kingdom", "Name": "UK 10Y", "Last": 4.1},
+        ]
+        with patch.dict(os.environ, {"TRADING_ECONOMICS_API_KEY": "key", "TRADING_ECONOMICS_DISTRIBUTION_LICENSED": "true"}), patch.object(te, "_get", new=AsyncMock(return_value=rows)):
+            yields = asyncio.run(te.fetch_bond_yield_context(event))
+        self.assertEqual(len(yields), 1)
+        self.assertEqual(yields[0]["country"], "United States")
+        self.assertEqual(yields[0]["yield_pct"], 4.25)
+
     def test_provider_actual_retrieval_includes_revision_and_source(self):
         event = self.event(forecast="180K", previous="175K")
         event["provider_calendar_id"] = "te-456"
