@@ -7,7 +7,8 @@ from telegram.ext import Application
 from config import TELEGRAM_BOT_TOKEN
 from bot import register_handlers
 from auto_scanner import auto_scan_loop
-from signal_monitor import monitor_signals_loop\nfrom economic_events_bot import economic_events_loop
+from signal_monitor import monitor_signals_loop
+from economic_events_bot import economic_events_loop
 
 
 logging.basicConfig(
@@ -30,6 +31,10 @@ async def post_init(application):
     application.create_task(
         monitor_signals_loop(application),
         name="forex-hunter-signal-monitor",
+    )
+    application.create_task(
+        economic_events_loop(application),
+        name="forex-hunter-economic-events",
     )
 
 
