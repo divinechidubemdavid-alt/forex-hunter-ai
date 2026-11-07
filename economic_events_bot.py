@@ -57,9 +57,10 @@ def _event_text(event):
 async def show_event_center(update, context):
     await update.effective_message.reply_text(
         "🧠 ECONOMIC EVENT INTELLIGENCE\n\n"
-        "Official BLS calendar events are synced automatically. U.S. employment and CPI actuals "
-        "can be verified against the official BLS data API after release. Other releases are "
-        "never marked verified unless a supported official source supplies the actual figure.\n\n"
+        "Official BLS, Federal Reserve and BEA calendars are synced automatically. If a licensed "
+        "global provider is configured, the bot also retrieves consensus, actuals, revisions and "
+        "economic news across supported currencies. Otherwise, BLS official actuals and clearly "
+        "labelled historical-trend estimates are used where supported.\n\n"
         "Technical checks use completed candles and the existing Twelve Data daily safety limit. "
         "No market-consensus figure is invented. All event times are shown in Nigeria time.",
         reply_markup=event_center_keyboard(),
