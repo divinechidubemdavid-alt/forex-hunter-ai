@@ -27,7 +27,8 @@ from market_scope import get_strong_signal_markets
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
-from economic_events_bot import show_event_center, handle_event_callback, handle_event_text, register_event_handlers\nfrom report_charts import (
+from economic_events_bot import show_event_center, handle_event_callback, handle_event_text, register_event_handlers
+from report_charts import (
     create_performance_report,
     create_tracked_report,
     create_history_report,
@@ -41,7 +42,8 @@ MENU = ReplyKeyboardMarkup(
     [
         ["🔎 Market Scanner", "🔥 Strong Signals"],
         ["📌 My Tracked Signals", "📊 Performance"],
-        ["📚 Signal History", "⚙️ Settings"],\n        ["🗓 Economic Events"],
+        ["📚 Signal History", "⚙️ Settings"],
+        ["🗓 Economic Events"],
         ["ℹ️ Help"],
     ],
     resize_keyboard=True,
@@ -872,6 +874,8 @@ async def analyse_market(update, context, symbol, timeframe):
 
 
 async def handle_event_callback_if_needed(update, context):\n    query = update.callback_query\n    if query and str(query.data or "").startswith("econ:"):\n        await handle_event_callback(update, context)\n        return True\n    return False\n\n\nasync def handle_callback(update, context):
+    if await handle_event_callback_if_needed(update, context):
+        return
     query = update.callback_query
     await query.answer()
 
@@ -1202,7 +1206,16 @@ async def handle_event_callback_if_needed(update, context):\n    query = update.
         return
 
 
-def text_for_event_center(update):\n    return (update.message.text or "").strip() == "🗓 Economic Events"\n\n\nasync def handle_text(update, context):
+def text_for_event_center(update):
+    return (update.message.text or "").strip() == "🗓 Economic Events"
+
+
+async def handle_text(update, context):
+    if text_for_event_center(update):
+        await show_event_center(update, context)
+        return
+    if await handle_event_text(update, context):
+        return
     text = (update.message.text or "").strip()
 
     if text.lower() == "cancel" and context.user_data.get("awaiting_custom_risk"):
@@ -1268,6 +1281,7 @@ def text_for_event_center(update):\n    return (update.message.text or "").strip
 
 
 def register_handlers(application: Application):
+    register_event_handlers(application)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(handle_callback))
