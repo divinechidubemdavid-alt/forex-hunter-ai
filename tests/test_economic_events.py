@@ -309,5 +309,14 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(analysis["market_biases"]["XAU/USD"], "SELL")
 
 
+    def test_legacy_bls_timezone_alias_resolves_to_new_york(self):
+        self.assertEqual(ee._ics_timezone("US-Eastern").key, "America/New_York")
+        self.assertEqual(ee._ics_timezone("US/Eastern").key, "America/New_York")
+
+    def test_unknown_ics_timezone_is_reported_cleanly(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported or unavailable ICS timezone"):
+            ee._ics_timezone("Not/A_Real_Zone")
+
+
 if __name__ == "__main__":
     unittest.main()
