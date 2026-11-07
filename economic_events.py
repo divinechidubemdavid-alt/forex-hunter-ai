@@ -269,10 +269,12 @@ async def fetch_fomc_events():
         response.raise_for_status()
     page = html.unescape(response.text)
     imported = []
-    sections = re.findall(
-        r"<h[1-6][^>]*>\\s*(20\\d{2}) FOMC Meetings.*?(?=<h[1-6][^>]*>\\s*20\\d{2} FOMC Meetings|$)",
-        page, re.I | re.S,
-    )
+    sections = [
+        match.group(0) for match in re.finditer(
+            r"<h[1-6][^>]*>\\s*20\\d{2} FOMC Meetings.*?(?=<h[1-6][^>]*>\\s*20\\d{2} FOMC Meetings|$)",
+            page, re.I | re.S,
+        )
+    ]
     month_numbers = {
         "january": 1, "february": 2, "march": 3, "april": 4,
         "may": 5, "june": 6, "july": 7, "august": 8,
