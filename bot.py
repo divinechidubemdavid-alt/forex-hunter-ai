@@ -605,8 +605,8 @@ def _performance_summary(signals):
         f"Win rate (TP3 and manual TP1/TP2 closes vs SL): {win_rate:.1f}%\n"
         f"TP achievements: TP1 {tp[0]} | TP2 {tp[1]} | TP3 {tp[2]}\n"
         f"Cumulative realised R: {total_r:+.2f}R\n\n"
-        "Manually stopped, invalidated and ambiguous signals are excluded "
-        "from win/loss statistics. This is signal analytics, not broker P/L."
+        "Manual closes after TP1/TP2 count as milestone wins. Stops before TP1, invalidated "
+        "and ambiguous signals are excluded. This is signal analytics, not broker P/L."
     )
 
 
@@ -1181,10 +1181,14 @@ async def handle_callback(update, context):
         if not signal or signal.get("status") != "TRACKING":
             await query.edit_message_text("This signal is no longer active.")
             return
-        await query.edit_message_text(
+        message = (
             f"✅ Continuing to track {signal.get('symbol', 'this signal')}. "
             "Monitoring remains active for the next target or stop-loss."
         )
+        if getattr(query.message, "photo", None):
+            await query.edit_message_caption(caption=message)
+        else:
+            await query.edit_message_text(text=message)
         return
 
     if data == "settings:timeframe":
