@@ -228,6 +228,23 @@ def _combine(ai: dict, technical: str | None) -> dict:
         confidence = min(confidence, 35) if technical is None else max(10, confidence - 5)
         reasons.append("Technical confirmation is unavailable or neutral.")
     reasons.extend(ai.get("risk_factors", [])[:4])
+    currency = str(ai.get("currency") or "USD").upper()
+    pairs = {
+        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "XAU/USD"],
+        "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
+        "AUD": ["AUD/USD"], "CAD": ["USD/CAD"], "CHF": ["USD/CHF"],
+        "XAU": ["XAU/USD"],
+    }.get(currency, [])
+    market_biases = {}
+    for pair in pairs:
+        base, quote = pair.split("/")
+        pair_direction = combined
+        if currency == quote:
+            pair_direction = {"BULLISH": "BEARISH", "BEARISH": "BULLISH"}.get(combined, combined)
+        market_biases[pair] = (
+            "BUY" if pair_direction == "BULLISH" else
+            "SELL" if pair_direction == "BEARISH" else "NO CLEAR DIRECTION"
+        )
     return {
         "currency": ai.get("currency"),
         "direction": combined,
@@ -240,8 +257,9 @@ def _combine(ai: dict, technical: str | None) -> dict:
         "explanation": ai.get("explanation"),
         "risk_factors": ai.get("risk_factors", []),
         "evidence_sources": ai.get("evidence_sources", []),
-        "affected_markets": [],
-        "market_biases": {},
+        "affected_markets": pairs,
+        "market_biases": market_biases,
+        "ai_interpretation": ai,
         "phase": "ai_macro_interpretation",
         "basis": "verified supplied event/news evidence",
         "reasons": [x for x in reasons if x],
@@ -264,7 +282,7 @@ def install() -> None:
         ai_result = None
         if checkpoint == "5m":
             baseline = event.get("final_15m") or {}
-            baseline_ai = baseline.get("analysis", {}).get("ai_interpretation")
+            baseline_ai = baseline.get("analysis", {}).get("ai_interpretation") or (baseline.get("technical_snapshot") or {}).get("ai_interpretation")
             old_evidence = baseline.get("event_evidence") or {}
             new_evidence = ee._event_evidence(event)
             event_changes = ee._material_event_change(old_evidence, new_evidence)
