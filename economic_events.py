@@ -421,6 +421,8 @@ def record_market_reaction(event_id, snapshot, minutes_after):
             prefix = "Directional alignment only"
         elif report.get("forecast_type") in {"model_estimate", "provider_model_estimate"}:
             prefix = "Model-estimate alignment"
+        elif report.get("forecast_type") == "user_supplied":
+            prefix = "User-supplied forecast alignment"
         else:
             prefix = "Consensus-forecast alignment"
         report["forecast_score"] = f"{prefix}: {matches}/{total} windows ({percent}%)"
