@@ -185,7 +185,10 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
             record["verification"] = "NO_15M_BASELINE"
         else:
             record["prior_analysis"] = baseline["analysis"]
-            if (technical_snapshot or {}).get("status") != "AVAILABLE":
+            if (
+                (baseline.get("technical_snapshot") or {}).get("status") != "AVAILABLE"
+                or (technical_snapshot or {}).get("status") != "AVAILABLE"
+            ):
                 record["analysis"] = baseline["analysis"]
                 record["verification"] = "UNAVAILABLE"
                 record["material_changes"] = []
