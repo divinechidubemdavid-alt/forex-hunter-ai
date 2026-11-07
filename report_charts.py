@@ -59,6 +59,7 @@ def create_performance_report(signals, period_label="All time"):
     ]
     wins = sum(s.get("status") in {"TP3", "MANUAL_WIN"} for s in eligible)
     losses = sum(s.get("status") == "STOP_LOSS" for s in eligible)
+    manual_wins = sum(s.get("status") == "MANUAL_WIN" for s in eligible)
     win_rate = (wins / len(eligible) * 100) if eligible else 0.0
     total_r = sum(_realised_r(s) for s in signals
                   if s.get("status") not in {"MANUALLY_STOPPED", "INVALIDATED", "AMBIGUOUS"})
@@ -89,8 +90,9 @@ def create_performance_report(signals, period_label="All time"):
 
     ax.text(0.03, 0.53, "OUTCOMES", transform=ax.transAxes,
             color=GOLD, fontsize=11, weight="bold")
-    ax.text(0.03, 0.40, f"Wins: {wins}     Losses: {losses}",
-            transform=ax.transAxes, color=TEXT, fontsize=14)
+    ax.text(0.03, 0.40,
+            f"Wins: {wins}     Losses: {losses}     Manual TP1/TP2 wins: {manual_wins}",
+            transform=ax.transAxes, color=TEXT, fontsize=12)
     ax.text(0.03, 0.25,
             f"Target achievements     TP1: {tp_counts[0]}     TP2: {tp_counts[1]}     TP3: {tp_counts[2]}",
             transform=ax.transAxes, color=TEXT, fontsize=12)
@@ -135,25 +137,112 @@ def create_tracked_report(signals):
     return _finish(fig, "forex_hunter_tracked_signals.png")
 
 
-def create_history_report(signals):
-    signals = list(signals or [])[:30]
-    fig = _base("SIGNAL HISTORY", f"Most recent {len(signals)} saved signal(s)  •  {datetime.now(WAT):%d %b %Y, %H:%M} WAT")
-    ax = fig.add_axes([0.10, 0.16, 0.82, 0.58])
+def create_history_report(signals, period_label="All history"):
+    """Render a visual report card for the selected signal-history period."""
+    signals = list(signals or [])
+    completed = [s for s in signals if s.get("status") != "TRACKING"]
+    eligible = [s for s in signals if s.get("status") in {"TP3", "MANUAL_WIN", "STOP_LOSS"}]
+    wins = sum(s.get("status") in {"TP3", "MANUAL_WIN"} for s in eligible)
+    losses = sum(s.get("status") == "STOP_LOSS" for s in eligible)
+    win_rate = wins / len(eligible) * 100 if eligible else 0.0
+    manual_wins = sum(s.get("status") == "MANUAL_WIN" for s in signals)
+    stop_losses = sum(s.get("status") == "STOP_LOSS" for s in signals)
+    excluded = sum(s.get("status") in {"MANUALLY_STOPPED", "INVALIDATED", "AMBIGUOUS"} for s in signals)
+    total_r = sum(_realised_r(s) for s in signals
+                  if s.get("status") not in {"MANUALLY_STOPPED", "INVALIDATED", "AMBIGUOUS"})
+    tp_counts = [sum(bool(s.get(f"tp{i}_hit")) for s in signals) for i in (1, 2, 3)]
+
+    visible = signals[:18]
+    height = max(8.2, 5.0 + len(visible) * 0.34)
+    fig = plt.figure(figsize=(13, height), facecolor=BG)
+    fig.text(0.06, 0.965, "FOREX HUNTER AI", color=GOLD, fontsize=11, weight="bold")
+    fig.text(0.06, 0.925, "SIGNAL HISTORY", color=TEXT, fontsize=23, weight="bold")
+    fig.text(0.06, 0.895, f"{period_label}  •  {datetime.now(WAT):%d %b %Y, %H:%M} WAT",
+             color=MUTED, fontsize=10)
+
+    ax = fig.add_axes([0.05, 0.70, 0.90, 0.15])
     ax.set_facecolor(PANEL)
-    if signals:
-        labels = [f"{s.get('symbol', '?')} #{s.get('id', '?')}" for s in reversed(signals)]
-        values = [_realised_r(s) for s in reversed(signals)]
-        colors = [GREEN if v >= 0 else RED for v in values]
-        ax.barh(labels, values, color=colors)
-        ax.axvline(0, color=GOLD, linewidth=1)
-        ax.tick_params(axis="y", colors=TEXT, labelsize=8)
-        ax.tick_params(axis="x", colors=MUTED, labelsize=8)
-        ax.set_xlabel("Realised R (where measurable)", color=MUTED)
-        ax.grid(axis="x", color="#26332B", linestyle=":", alpha=0.7)
+    ax.axis("off")
+    cards = [
+        ("TRACKED", str(len(signals)), GREEN),
+        ("COMPLETED", str(len(completed)), GOLD),
+        ("WIN RATE", f"{win_rate:.1f}%", GREEN),
+        ("NET RESULT", f"{total_r:+.2f}R", GREEN if total_r >= 0 else RED),
+    ]
+    for i, (label, value, color) in enumerate(cards):
+        x = 0.015 + i * 0.247
+        ax.add_patch(plt.Rectangle((x, 0.10), 0.225, 0.82,
+                                   transform=ax.transAxes, color="#17221B"))
+        ax.text(x + 0.018, 0.70, label, transform=ax.transAxes,
+                color=MUTED, fontsize=8, weight="bold")
+        ax.text(x + 0.018, 0.34, value, transform=ax.transAxes,
+                color=color, fontsize=17, weight="bold")
+
+    fig.text(0.07, 0.665,
+             f"WINS {wins}   •   LOSSES {losses}   •   MANUAL TP1/TP2 WINS {manual_wins}   •   STOPPED/INVALID/UNCLEAR {excluded}",
+             color=TEXT, fontsize=9, weight="bold")
+    fig.text(0.07, 0.635,
+             f"TARGETS REACHED     TP1: {tp_counts[0]}     TP2: {tp_counts[1]}     TP3: {tp_counts[2]}",
+             color=GOLD, fontsize=10, weight="bold")
+
+    table_ax = fig.add_axes([0.055, 0.055, 0.89, 0.54])
+    table_ax.set_facecolor(PANEL)
+    table_ax.axis("off")
+    headers = ["ID", "MARKET", "SIDE", "TF", "RESULT", "TARGET", "R"]
+    rows = []
+    for signal in visible:
+        status = str(signal.get("status", "N/A"))
+        if status == "MANUAL_WIN":
+            result = f"WIN • MANUAL TP{signal.get('manual_close_after_tp', '?')}"
+            target = f"TP{signal.get('manual_close_after_tp', '?')}"
+        elif status == "TP3":
+            result, target = "WIN • TP3", "TP3"
+        elif status == "STOP_LOSS":
+            result, target = "STOP LOSS", "SL"
+        elif status == "TRACKING":
+            result = "ACTIVE"
+            reached = [i for i in (1, 2, 3) if signal.get(f"tp{i}_hit")]
+            target = f"TP{max(reached)} reached" if reached else "In progress"
+        elif status == "MANUALLY_STOPPED":
+            result, target = "STOPPED", "Before TP1"
+        else:
+            result, target = status.replace("_", " "), "—"
+        rows.append([
+            f"#{signal.get('id', '?')}",
+            str(signal.get("symbol", "?")),
+            str(signal.get("direction", "?")),
+            str(signal.get("timeframe", "—")).upper(),
+            result,
+            target,
+            f"{_realised_r(signal):+.2f}R",
+        ])
+
+    if rows:
+        table = table_ax.table(
+            cellText=rows, colLabels=headers, cellLoc="left", colLoc="left",
+            loc="upper center", colWidths=[0.07, 0.16, 0.08, 0.07, 0.25, 0.19, 0.10],
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(8)
+        table.scale(1, 1.55)
+        for (row, col), cell in table.get_celld().items():
+            cell.set_edgecolor("#26332B")
+            if row == 0:
+                cell.set_facecolor("#1B2920")
+                cell.set_text_props(color=GOLD, weight="bold")
+            else:
+                cell.set_facecolor(PANEL if row % 2 else "#0D1310")
+                cell.set_text_props(color=TEXT)
     else:
-        ax.text(0.5, 0.5, "NO SAVED SIGNALS", ha="center", va="center",
-                color=MUTED, fontsize=18, transform=ax.transAxes)
-        ax.set_axis_off()
-    for spine in ax.spines.values():
-        spine.set_color("#27332C")
+        table_ax.text(0.5, 0.5, "NO SIGNALS IN THIS PERIOD",
+                      ha="center", va="center", color=MUTED,
+                      fontsize=18, weight="bold", transform=table_ax.transAxes)
+
+    if len(signals) > len(visible):
+        fig.text(0.07, 0.025,
+                 f"Showing the latest {len(visible)} of {len(signals)} signals in this period.",
+                 color=MUTED, fontsize=8)
+    fig.text(0.07, 0.008,
+             "Manual TP1/TP2 closes count as milestone wins. R is an estimate from monitored prices, not broker-confirmed P/L.",
+             color=MUTED, fontsize=7)
     return _finish(fig, "forex_hunter_signal_history.png")
