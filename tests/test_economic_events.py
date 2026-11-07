@@ -1,4 +1,6 @@
 import unittest
+import os
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -115,6 +117,19 @@ class EconomicEventTests(unittest.TestCase):
             5,
         )
         self.assertEqual(report["forecast_score"], "DIRECTIONAL_ALIGNMENT_ONLY")
+
+    def test_global_provider_requires_distribution_licence_flag(self):
+        with patch.dict(os.environ, {"TRADING_ECONOMICS_API_KEY": "test-key", "TRADING_ECONOMICS_DISTRIBUTION_LICENSED": "false"}):
+            self.assertFalse(te.configured())
+        with patch.dict(os.environ, {"TRADING_ECONOMICS_API_KEY": "test-key", "TRADING_ECONOMICS_DISTRIBUTION_LICENSED": "true"}):
+            self.assertTrue(te.configured())
+
+    def test_directional_analysis_parses_provider_units(self):
+        item = self.event(forecast="180K", previous="175K")
+        item["higher_is_better"] = True
+        self.assertEqual(ee.directional_analysis(item)["direction"], "BULLISH")
+        item["actual"] = "170K"
+        self.assertEqual(ee.directional_analysis(item, phase="post-event")["direction"], "BEARISH")
 
     def test_provider_values_support_units(self):
         self.assertEqual(ee._to_number("175K"), 175000)
