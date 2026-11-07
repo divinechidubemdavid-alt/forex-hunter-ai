@@ -297,6 +297,25 @@ async def economic_events_loop(application):
                             log.info("Official actual saved for %s", event.get("title"))
                     except Exception:
                         log.exception("Automatic actual report failed")
+                event = ee.get_event(event["id"]) or event
+                if event.get("status") == "released" and event.get("post_event_report"):
+                    elapsed = now - ee._parse_dt(event["scheduled_at"])
+                    attempts = event.setdefault("post_release_attempts", [])
+                    for minutes_after in (5, 15, 30):
+                        if elapsed >= timedelta(minutes=minutes_after) and minutes_after not in attempts:
+                            attempts.append(minutes_after)
+                            ee.save_event(event)
+                            try:
+                                reaction = await research.technical_snapshot(
+                                    event, "15m" if minutes_after >= 15 else "5m"
+                                )
+                                reaction.pop("_frame", None)
+                                if reaction.get("status") == "AVAILABLE":
+                                    ee.record_market_reaction(event["id"], reaction, minutes_after)
+                            except Exception:
+                                log.exception("Post-release market reaction check failed")
+                            event = ee.get_event(event["id"]) or event
+                            attempts = event.setdefault("post_release_attempts", [])
                 for checkpoint in ee.due_checkpoints(event, now):
                     snapshot = await research.technical_snapshot(event, checkpoint)
                     frame = snapshot.pop("_frame", None)
