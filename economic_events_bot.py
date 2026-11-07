@@ -173,6 +173,14 @@ async def handle_event_callback(update, context):
             f'{name}: {item.get("verification", item.get("analysis", {}).get("direction", "saved"))}'
             for name, item in checkpoints.items()
         ) or "No checkpoint reports saved yet."
+        news_text = "\n".join(
+            f'• {item.get("title", "Headline")}: {item.get("description", "")[:150]}'
+            for item in event.get("research_news", [])[:3]
+        )
+        yields_text = "\n".join(
+            f'{item.get("country")}: {item.get("yield_pct")}% 10Y'
+            for item in event.get("bond_yield_context", [])
+        )
         caption = (
             _event_text(event) + "\n\n"
             f'CURRENT FUNDAMENTAL BIAS: {analysis["direction"]} '
@@ -181,6 +189,8 @@ async def handle_event_callback(update, context):
             + "\n\nAFFECTED PAIR BIASES:\n"
             + "\n".join(f'{pair}: {bias}' for pair, bias in analysis.get("market_biases", {}).items())
             + "\n\nCHECKPOINT HISTORY:\n" + checkpoint_text
+            + ("\n\nLATEST NEWS:\n" + news_text if news_text else "")
+            + ("\n\n10Y YIELDS:\n" + yields_text if yields_text else "")
             + ("\n\nPost-release report: available." if report else "\n\nPost-release report: awaiting official actual data.")
         )
         photo = ee.render_event_chart(event, analysis)
