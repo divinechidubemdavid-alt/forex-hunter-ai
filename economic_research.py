@@ -293,20 +293,49 @@ async def technical_snapshot(event: dict, checkpoint: str) -> dict:
         return {"status": "UNAVAILABLE", "market": market, "reason": str(exc)}
 
 def material_change(baseline: dict, current: dict) -> tuple[bool, list[str]]:
-    """Ignore ordinary noise; only confirm material market/regime changes."""
+    """Ignore weak EMA flips; require a meaningful completed-candle regime change."""
     changes = []
-    if current.get("status") != "AVAILABLE":
+    if baseline.get("status") != "AVAILABLE" or current.get("status") != "AVAILABLE":
         return False, changes
-    if baseline.get("direction") != current.get("direction"):
-        changes.append("technical direction changed")
-    old_adx, new_adx = baseline.get("adx"), current.get("adx")
-    if old_adx is not None and new_adx is not None and abs(new_adx - old_adx) >= 8:
-        changes.append("ADX regime changed materially")
-    if current.get("breakout") in {"UPSIDE_BREAKOUT", "DOWNSIDE_BREAKOUT"} and current.get("breakout") != baseline.get("breakout"):
-        changes.append("completed-candle range breakout detected")
-    old_vol, new_vol = baseline.get("volatility_pct"), current.get("volatility_pct")
-    if old_vol and new_vol and new_vol >= old_vol * 1.8:
-        changes.append("volatility expanded materially")
+    old_direction = baseline.get("direction")
+    new_direction = current.get("direction")
+    old_adx = baseline.get("adx")
+    new_adx = current.get("adx")
+    if (
+        old_direction in {"BULLISH", "BEARISH"}
+        and new_direction in {"BULLISH", "BEARISH"}
+        and old_direction != new_direction
+        and old_adx is not None and new_adx is not None
+        and old_adx >= 20 and new_adx >= 20
+    ):
+        changes.append("confirmed directional reversal with ADX at or above 20")
+    if (
+        old_direction in {"BULLISH", "BEARISH"}
+        and new_direction == "NEUTRAL"
+        and old_adx is not None and new_adx is not None
+        and old_adx >= 25 and new_adx <= 18
+        and old_adx - new_adx >= 8
+    ):
+        changes.append("trend-strength collapse into a neutral regime")
+    if old_adx is not None and new_adx is not None and new_adx >= 25 and new_adx - old_adx >= 8:
+        changes.append("ADX trend strength increased materially")
+    old_breakout = baseline.get("breakout")
+    new_breakout = current.get("breakout")
+    if new_breakout in {"UPSIDE_BREAKOUT", "DOWNSIDE_BREAKOUT"} and new_breakout != old_breakout:
+        aligned = (
+            (new_breakout == "UPSIDE_BREAKOUT" and new_direction == "BULLISH")
+            or (new_breakout == "DOWNSIDE_BREAKOUT" and new_direction == "BEARISH")
+        )
+        if aligned:
+            changes.append("new completed-candle breakout aligned with technical direction")
+    old_volatility = baseline.get("volatility_pct")
+    new_volatility = current.get("volatility_pct")
+    if (
+        old_volatility and new_volatility
+        and new_volatility >= old_volatility * 1.8
+        and (new_direction != old_direction or new_breakout in {"UPSIDE_BREAKOUT", "DOWNSIDE_BREAKOUT"})
+    ):
+        changes.append("volatility expanded materially with directional or breakout evidence")
     return bool(changes), changes
 
 async def auto_actual_release(event: dict) -> dict | None:
