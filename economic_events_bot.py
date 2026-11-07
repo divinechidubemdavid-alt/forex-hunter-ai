@@ -37,6 +37,7 @@ async def _sync_calendars():
         except Exception:
             log.exception("Licensed global calendar sync failed; using official-source fallback")
     total = 0
+    successes = 0
     failures = []
     for label, importer in (
         ("BLS", ee.fetch_ics_events),
@@ -44,11 +45,16 @@ async def _sync_calendars():
         ("BEA", ee.fetch_bea_events),
     ):
         try:
-            total += len(await importer())
+            imported = await importer()
+            successes += 1
+            total += len(imported)
+            log.info("%s calendar sync completed; %d new events imported", label, len(imported))
         except Exception as exc:
             failures.append(label)
             log.exception("%s calendar sync failed", label)
-    if failures and total == 0:
+    # A successful importer may return zero because there are no new dates to add.
+    # Only report total failure when every official source raised an exception.
+    if failures and successes == 0:
         raise RuntimeError("All official calendar imports failed: " + ", ".join(failures))
     source = "official BLS, Federal Reserve and BEA calendars"
     if failures:
