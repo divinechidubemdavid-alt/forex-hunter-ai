@@ -251,6 +251,9 @@ async def handle_event_text(update, context):
                 previous=None if previous == "-" else previous, owner_id=user_id,
             )
             event["higher_is_better"] = higher_is_better
+            if forecast != "-":
+                event["forecast_type"] = "user_supplied"
+                event["forecast_source"] = "User supplied event input"
             ee.save_event(event)
             context.user_data.pop("econ_awaiting", None)
             await update.message.reply_text("✅ Personal event saved. Only your account will receive its alerts.")
@@ -383,7 +386,7 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f'🚨 ECONOMIC EVENT — {checkpoint.upper()} CHECKPOINT\n\n'
         f'{event["title"]}\nEvent time: {scheduled:%d %b %Y, %H:%M} WAT\n'
         f'Currency: {event.get("currency", "USD")}\n'
-        f'Forecast: {event.get("forecast") or "Not supplied"} | Previous: {event.get("previous") or "Not supplied"}\n\n'
+        f'Forecast ({event.get("forecast_type", "user supplied" if event.get("forecast") else "not supplied")}): {event.get("forecast") or "Not supplied"} | Previous: {event.get("previous") or "Not supplied"}\n\n'
         f'Fundamental direction: {analysis.get("fundamental_direction", analysis["direction"])}\n'
         f'Technical direction: {analysis.get("technical_direction", "NOT PROVIDED")}\n'
         f'Combined forecast: {analysis.get("combined_direction", analysis["direction"])} | Confidence: {analysis["confidence"]}/100\n'
