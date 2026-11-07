@@ -692,17 +692,6 @@ def _report_period_keyboard(report_type):
     ])
 
 
-async def _request_custom_report_dates(query, report_type):
-    context = query.message
-    context.chat_data.setdefault("report_date_owner", {})
-    await context.reply_text(
-        "📅 CUSTOM REPORT RANGE\n\n"
-        "Send the START date in YYYY-MM-DD format.\n"
-        "Example: 2026-10-01"
-    )
-    # The user-specific state is set by the callback handler before this helper is called.
-
-
 async def _send_performance(chat, user_id, period, custom_start=None, custom_end=None):
     all_signals = state.get_signal_history(user_id, limit=10000)
     signals, label = _report_period(all_signals, period, custom_start, custom_end)
