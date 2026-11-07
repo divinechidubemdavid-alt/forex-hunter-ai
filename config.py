@@ -89,13 +89,13 @@ GOLD_BUDGET_SHARE = 0.50
 # Single source of truth for session eligibility.
 # Weekday session: supported forex pairs plus Gold.
 WEEKDAY_MARKETS = (
+    "XAU/USD",
     "EUR/USD",
     "GBP/USD",
     "USD/JPY",
     "AUD/USD",
     "USD/CAD",
     "USD/CHF",
-    "XAU/USD",
 )
 
 # Weekend session: Bitcoin only.
