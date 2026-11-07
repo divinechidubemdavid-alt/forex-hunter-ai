@@ -148,6 +148,33 @@ def directional_analysis(event, technical=None, phase="pre-event"):
                 reasons.append("Figure recorded, but its favourable direction is not defined; no directional assumption made.")
         except (TypeError, ValueError):
             reasons.append("Release figure is not numeric; no directional assumption made.")
+    if phase == "post-event":
+        companion_directions = []
+        for metric in (event.get("actual_details") or {}).get("metrics", []):
+            metric_value = _to_number(metric.get("value"))
+            metric_previous = _to_number(metric.get("previous_value"))
+            favourable = metric.get("higher_is_better")
+            if metric_value is None or metric_previous is None or favourable is None:
+                continue
+            if metric_value == metric_previous:
+                metric_direction = "NEUTRAL"
+            else:
+                metric_positive = (metric_value > metric_previous) == bool(favourable)
+                metric_direction = "BULLISH" if metric_positive else "BEARISH"
+            companion_directions.append(metric_direction)
+            reasons.append(
+                f'Companion {metric.get("name", "indicator")}: {metric.get("value")} '
+                f'versus {metric.get("previous_value")} ({metric_direction.lower()} for {currency}).'
+            )
+        directional_companions = [item for item in companion_directions if item in {"BULLISH", "BEARISH"}]
+        if direction in {"BULLISH", "BEARISH"} and directional_companions:
+            if any(item != direction for item in directional_companions):
+                confidence = max(20, confidence - 8)
+                reasons.append("Mixed companion labour data reduced confidence in the primary release direction.")
+            elif len(directional_companions) >= 2:
+                confidence = min(90, confidence + 5)
+                reasons.append("Companion labour indicators support the primary release direction.")
+
     if technical in ("BULLISH", "BEARISH"):
         if direction == "NEUTRAL":
             reasons.append(f"Technical context is {technical}, but event evidence is insufficient.")
