@@ -184,7 +184,7 @@ class EconomicEventTests(unittest.TestCase):
              "breakout": "NONE", "source": "test"},
             5,
         )
-        self.assertEqual(report["forecast_score"], "ALIGNED")
+        self.assertEqual(report["forecast_score"], "Consensus-forecast alignment: 1/1 windows (100%)")
         self.assertEqual(report["forecast_score_value"], 1)
         self.assertEqual(report["market_reactions"][0]["minutes_after"], 5)
 
@@ -199,7 +199,7 @@ class EconomicEventTests(unittest.TestCase):
              "direction": "BEARISH", "source": "test"},
             5,
         )
-        self.assertEqual(report["forecast_score"], "DIRECTIONAL_ALIGNMENT_ONLY")
+        self.assertEqual(report["forecast_score"], "Directional alignment only: 1/1 windows (100%)")
 
     def test_global_provider_requires_distribution_licence_flag(self):
         with patch.dict(os.environ, {"TRADING_ECONOMICS_API_KEY": "test-key", "TRADING_ECONOMICS_DISTRIBUTION_LICENSED": "false"}):
