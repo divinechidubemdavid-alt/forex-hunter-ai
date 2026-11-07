@@ -873,7 +873,15 @@ async def analyse_market(update, context, symbol, timeframe):
         )
 
 
-async def handle_event_callback_if_needed(update, context):\n    query = update.callback_query\n    if query and str(query.data or "").startswith("econ:"):\n        await handle_event_callback(update, context)\n        return True\n    return False\n\n\nasync def handle_callback(update, context):
+async def handle_event_callback_if_needed(update, context):
+    query = update.callback_query
+    if query and str(query.data or "").startswith("econ:"):
+        await handle_event_callback(update, context)
+        return True
+    return False
+
+
+async def handle_callback(update, context):
     if await handle_event_callback_if_needed(update, context):
         return
     query = update.callback_query
