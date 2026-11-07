@@ -85,7 +85,6 @@ PLACE_BROKER_ORDERS = False
 
 # Adaptive scanner policy.
 GOLD_BUDGET_SHARE = 0.50
-WEEKEND_MARKETS = ("BTC/USD",)
 
 # Single source of truth for session eligibility.
 # Weekday session: supported forex pairs plus Gold.
