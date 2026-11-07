@@ -51,6 +51,11 @@ class EconomicEventHistoryTests(unittest.TestCase):
         self.assertEqual(result["directional_accuracy_pct"], 50.0)
         self.assertEqual(result["unscored"], 1)
 
+    def test_events_without_a_final_checkpoint_are_not_counted_as_neutral(self):
+        result = performance_summary([{"status": "scheduled"}])
+        self.assertEqual(result["not_finalized"], 1)
+        self.assertEqual(result["no_clear_direction"], 0)
+
     def test_trade_r_is_counted_only_when_outcome_is_recorded(self):
         result = performance_summary([
             {"trade_outcome": {"result": "WIN", "r_multiple": 2}},
