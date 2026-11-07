@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 
 import state
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from config import MARKETS, TELEGRAM_CHANNEL_ID
+from config import MARKETS, TELEGRAM_CHANNEL_ID, FOREX_MARKETS
+from market_scope import get_session_markets
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
@@ -22,25 +23,6 @@ MINIMUM_SCAN_INTERVAL_MINUTES = 30
 GOLD = "XAU/USD"
 BITCOIN = "BTC/USD"
 
-FOREX_MARKETS = [
-    "EUR/USD",
-    "GBP/USD",
-    "USD/JPY",
-    "AUD/USD",
-    "USD/CAD",
-    "USD/CHF",
-]
-
-ALL_MARKETS = [
-    GOLD,
-    "EUR/USD",
-    "GBP/USD",
-    "USD/JPY",
-    "AUD/USD",
-    "USD/CAD",
-    "USD/CHF",
-    BITCOIN,
-]
 
 
 def _is_weekend(now):
@@ -72,18 +54,21 @@ def _forex_market_open(now):
 
 
 def _eligible_markets(now):
+    """Apply the shared session allow-list, then respect forex market hours."""
+    allowed = get_session_markets(MARKETS, now.weekday())
+
     if _is_weekend(now):
-        return [BITCOIN] if BITCOIN in MARKETS else []
+        return [BITCOIN] if BITCOIN in allowed else []
 
     markets = []
 
-    if GOLD in MARKETS:
+    if GOLD in allowed:
         markets.append(GOLD)
 
     if _forex_market_open(now):
         markets.extend(
             market for market in FOREX_MARKETS
-            if market in MARKETS
+            if market in allowed
         )
 
     return markets
@@ -255,6 +240,16 @@ async def _send_signal(app, symbol, result):
 
 
 async def _scan_market(app, symbol):
+    current_session_markets = get_session_markets(
+        MARKETS, datetime.now(WAT).weekday()
+    )
+    if symbol not in current_session_markets:
+        logger.warning(
+            "Market %s is outside the currently allowed trading session; scan skipped.",
+            symbol,
+        )
+        return
+
     if symbol not in MARKETS:
         logger.warning(
             "Market %s is not configured.",
