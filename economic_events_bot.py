@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler
 
+from chart import create_market_chart
 import economic_events as ee
 import economic_research as research
 import state
@@ -222,14 +223,15 @@ async def _attempt_official_actual(event):
         return None
     event = ee.get_event(event["id"])
     event["actual_details"] = result
-    event["higher_is_better"] = event.get("higher_is_better", event.get("currency") == "USD")
+    event["higher_is_better"] = result.get("higher_is_better")
+    ee.save_event(event)
     return ee.record_actual(
         event["id"], str(result["value"]), notes="Automatically retrieved from the official BLS API.",
         details=result,
     )
 
 
-async def _send_event_alert(application, event, checkpoint, record):
+async def _send_event_alert(application, event, checkpoint, record, market_chart=None):
     analysis = record["analysis"]
     snapshot = record.get("technical_snapshot") or {}
     scheduled = ee._parse_dt(event["scheduled_at"]).astimezone(WAT)
@@ -259,7 +261,7 @@ async def _send_event_alert(application, event, checkpoint, record):
             text += "\n\nDIRECTION REVISED — NEW MATERIAL TECHNICAL EVIDENCE DETECTED."
         else:
             text += "\n\n5-MINUTE VERIFICATION INCOMPLETE — NO 15-MINUTE BASELINE."
-    photo = ee.render_event_chart(event, analysis)
+    photo = market_chart or ee.render_event_chart(event, analysis)
     recipients = [event["owner_id"]] if event.get("owner_id") else state.get_users()
     for user_id in recipients:
         try:
@@ -291,13 +293,22 @@ async def economic_events_loop(application):
                 for checkpoint in ee.due_checkpoints(event, now):
                     snapshot = await research.technical_snapshot(event, checkpoint)
                     frame = snapshot.pop("_frame", None)
+                    market_chart = None
+                    if frame is not None:
+                        try:
+                            market_chart = create_market_chart(
+                                frame, snapshot.get("market", "MARKET"),
+                                snapshot.get("timeframe", "15m"),
+                            )
+                        except Exception:
+                            log.exception("Could not render event market chart")
                     technical_direction = snapshot.get("currency_direction") if snapshot.get("status") == "AVAILABLE" else None
                     record = ee.record_checkpoint(
                         event["id"], checkpoint, technical=technical_direction,
                         technical_snapshot=snapshot,
                         evidence_note=snapshot.get("reason", ""),
                     )
-                    await _send_event_alert(application, event, checkpoint, record)
+                    await _send_event_alert(application, event, checkpoint, record, market_chart)
         except Exception:
             log.exception("Economic event scheduler iteration failed")
         await asyncio.sleep(20)
