@@ -293,6 +293,7 @@ class EconomicEventTests(unittest.TestCase):
     def test_provider_consensus_is_preferred_to_provider_model_estimate(self):
         self.assertEqual(te._consensus({"Forecast": "3.1%", "TEForecast": "3.2%"}), ("3.1%", "market_consensus"))
         self.assertEqual(te._consensus({"Forecast": "", "TEForecast": "3.2%"}), ("3.2%", "provider_model_estimate"))
+        self.assertEqual(te._consensus({"Forecast": 0, "TEForecast": "0.1"}), ("0", "market_consensus"))
 
     def test_provider_event_semantics_are_event_specific(self):
         self.assertTrue(te._higher_is_better("US CPI YoY"))
