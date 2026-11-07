@@ -209,6 +209,38 @@ async def fetch_event_actual(event: dict) -> dict | None:
     }
 
 
+async def fetch_bond_yield_context(event: dict) -> list[dict]:
+    """Return relevant 10Y government-bond yield context for the event currency."""
+    if not configured():
+        return []
+    countries = {
+        "USD": ["United States"], "EUR": ["Germany", "France"],
+        "GBP": ["United Kingdom"], "JPY": ["Japan"], "AUD": ["Australia"],
+        "CAD": ["Canada"], "CHF": ["Switzerland"], "NZD": ["New Zealand"],
+    }.get(str(event.get("currency", "USD")).upper(), [])
+    if not countries:
+        return []
+    rows = await _get("/markets/bond", {"type": "10Y"})
+    if not isinstance(rows, list):
+        return []
+    selected = []
+    for row in rows:
+        country = str(row.get("Country") or "")
+        if country not in countries:
+            continue
+        selected.append({
+            "country": country,
+            "name": row.get("Name"),
+            "yield_pct": row.get("Last"),
+            "daily_change": row.get("DailyChange"),
+            "weekly_change": row.get("WeeklyChange"),
+            "monthly_change": row.get("MonthlyChange"),
+            "updated_at": row.get("Date"),
+            "source": "Trading Economics 10Y government bond market snapshot",
+        })
+    return selected
+
+
 async def fetch_event_news(event: dict, limit: int = 3) -> list[dict]:
     if not configured():
         return []
