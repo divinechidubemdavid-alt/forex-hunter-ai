@@ -1,4 +1,3 @@
-
 import logging
 import os
 
@@ -9,6 +8,7 @@ from bot import register_handlers
 from auto_scanner import auto_scan_loop
 from signal_monitor import monitor_signals_loop
 from economic_events_bot import economic_events_loop
+import ai_economic_intelligence
 
 
 logging.basicConfig(
@@ -23,6 +23,7 @@ async def post_init(application):
     """Start the central automatic scanner after Telegram starts."""
 
     logger.info("Forex Hunter AI Telegram application started.")
+    ai_economic_intelligence.install()
 
     application.create_task(
         auto_scan_loop(application),
