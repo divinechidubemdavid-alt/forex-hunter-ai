@@ -24,6 +24,7 @@ HIGH_IMPACT_TERMS = (
     "nonfarm", "payroll", "cpi", "consumer price", "fomc", "federal funds",
     "interest rate", "unemployment", "pce", "gdp", "retail sales",
     "jobless claims", "average hourly earnings", "pmi", "powell",
+    "personal income and outlays", "personal consumption expenditures",
 )
 
 
@@ -336,7 +337,7 @@ async def fetch_bea_events():
             r"\\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+(\\d{1,2})\\b",
             values[0], re.I,
         )
-        time_match = re.search(r"\\b(\\d{1,2}:\\d{2})\\s*(AM|PM)\\b", values[1], re.I)
+        time_match = re.search(r"\\b(\\d{1,2}:\\d{2})\\s*(AM|PM)\\b", values[0], re.I)
         title = values[2]
         if not date_match or not time_match or not is_high_impact(title):
             continue
