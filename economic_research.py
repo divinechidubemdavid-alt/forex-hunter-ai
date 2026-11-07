@@ -119,6 +119,7 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
         "source_url": "https://www.bls.gov/developers/",
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "footnotes": unit,
+        "higher_is_better": kind in {"payroll", "hourly_earnings"},
     }
 
 def _market_for_currency(currency: str) -> str | None:
@@ -172,7 +173,7 @@ async def technical_snapshot(event: dict, checkpoint: str) -> dict:
             "atr": round(atr, 6), "close": close, "candle_time": data.index[-1].isoformat(),
             "breakout": breakout,
             "volatility_pct": round(atr / close * 100, 4) if close else None,
-            "source": "Twelve Data completed candles",
+            "source": "Twelve Data completed candles", "_frame": frame,
         }
     except Exception as exc:
         return {"status": "UNAVAILABLE", "market": market, "reason": str(exc)}
