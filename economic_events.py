@@ -96,6 +96,21 @@ def save_event(event):
     raise KeyError("Economic event not found.")
 
 
+def _to_number(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace(",", "").upper()
+    match = re.search(r"[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)\\s*([KMBT]?)", text)
+    if not match:
+        return None
+    number = float(match.group(0).rstrip("KMBT").strip())
+    suffix = match.group(1)
+    scale = {"": 1, "K": 1_000, "M": 1_000_000, "B": 1_000_000_000, "T": 1_000_000_000_000}[suffix]
+    return number * scale
+
+
 def directional_analysis(event, technical=None, phase="pre-event"):
     """Transparent rules-based directional bias; never represents a guess as consensus."""
     forecast = event.get("forecast")
@@ -110,8 +125,10 @@ def directional_analysis(event, technical=None, phase="pre-event"):
         reasons.append("No forecast or actual figure supplied; directional bias remains neutral.")
     else:
         try:
-            value = float(basis)
-            prior = float(comparator) if comparator is not None else None
+            value = _to_number(basis)
+            prior = _to_number(comparator) if comparator is not None else None
+            if value is None:
+                raise ValueError("Release value is not numeric.")
             # Generic numeric releases cannot be interpreted without knowing whether
             # higher or lower is favourable. Require explicit event metadata.
             favourable = event.get("higher_is_better")
