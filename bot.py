@@ -23,6 +23,7 @@ from telegram.ext import (
 
 import state
 from config import MARKETS
+from market_scope import get_strong_signal_markets
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
@@ -199,12 +200,17 @@ async def _fetch_strong_market_frame(symbol):
 
 
 async def _refresh_strong_signal_snapshot():
-    """Refresh all configured markets and return every currently strong setup.
+    """Refresh eligible markets and return current strong setups.
 
-    A shared 15-minute snapshot matches the 15-minute closed-candle strategy
-    and prevents repeated button taps from consuming more API requests. Market data itself is cached by market_data.
+    Weekends are BTC/USD-only. Weekdays check every configured market.
+    Snapshots are scoped separately so weekday forex opportunities cannot
+    appear in a weekend Strong Signals view.
     """
     now = datetime.now(WAT)
+    weekend_only = now.weekday() >= 5
+    scan_markets = get_strong_signal_markets(MARKETS, now.weekday())
+    market_scope = "weekend_btc_only" if weekend_only else "weekday_all_markets"
+
     saved = state.get_scanner_state("strong_signals_snapshot", {}) or {}
     saved_at = saved.get("updated_at")
     try:
@@ -214,14 +220,19 @@ async def _refresh_strong_signal_snapshot():
     except (TypeError, ValueError):
         saved_time = None
 
-    if saved_time and (now - saved_time).total_seconds() < 15 * 60:
+    if (
+        saved_time
+        and saved.get("market_scope") == market_scope
+        and (now - saved_time).total_seconds() < 15 * 60
+    ):
+        cached_items = [
+            item for item in (
+                state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
+            )
+            if item and item.get("symbol") in scan_markets
+        ]
         return (
-            [
-                item for item in (
-                    state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
-                )
-                if item
-            ],
+            cached_items,
             saved_time,
             True,
             int(saved.get("markets_checked", 0)),
@@ -231,7 +242,7 @@ async def _refresh_strong_signal_snapshot():
     strong = []
     errors = []
     markets_checked = 0
-    for symbol in MARKETS:
+    for symbol in scan_markets:
         try:
             frame = await _fetch_strong_market_frame(symbol)
             markets_checked += 1
@@ -278,6 +289,7 @@ async def _refresh_strong_signal_snapshot():
     snapshot_time = datetime.now(WAT)
     state.set_scanner_state("strong_signals_snapshot", {
         "updated_at": snapshot_time.isoformat(),
+        "market_scope": market_scope,
         "opportunity_ids": [str(item["id"]) for item in strong],
         "markets_checked": markets_checked,
         "errors": errors,
@@ -287,9 +299,16 @@ async def _refresh_strong_signal_snapshot():
 
 async def show_strong_signals(update, context):
     user_id = _user_id(update)
+    scan_markets = get_strong_signal_markets(MARKETS, datetime.now(WAT).weekday())
+    market_scope_text = (
+        "BTC/USD only (weekend mode)"
+        if len(scan_markets) == 1 and scan_markets[0] == "BTC/USD"
+        else "all configured markets (weekday mode)"
+    )
     await update.message.reply_text(
-        "🔄 Refreshing Strong Signals across all configured markets using "
-        "the latest completed 15-minute candles. This may take a little while."
+        "🔄 Refreshing Strong Signals across "
+        f"{market_scope_text} using the latest completed 15-minute candles. "
+        "This may take a little while."
     )
 
     (
@@ -337,7 +356,7 @@ async def show_strong_signals(update, context):
     await update.message.reply_text(
         f"🔥 STRONG SIGNALS — {label}\n"
         f"Last scan: {refreshed_at.strftime('%d %b %Y, %H:%M:%S')} WAT\n"
-        f"Markets checked successfully: {markets_checked}/{len(MARKETS)}\n"
+        f"Markets checked successfully: {markets_checked}/{len(scan_markets)}\n"
         f"Qualifying fresh setups: {len(strong)}\n\n"
         "Only current qualifying opportunities are shown. "
         "Track a signal to monitor its TP/SL progress.",
@@ -1133,14 +1152,21 @@ async def handle_callback(update, context):
                 InlineKeyboardButton("0.5%", callback_data="risk:0.5"),
                 InlineKeyboardButton("1%", callback_data="risk:1"),
                 InlineKeyboardButton("2%", callback_data="risk:2"),
+                InlineKeyboardButton("5%", callback_data="risk:5"),
+            ],
+            [
+                InlineKeyboardButton("10%", callback_data="risk:10"),
+                InlineKeyboardButton("15%", callback_data="risk:15"),
+                InlineKeyboardButton("20%", callback_data="risk:20"),
             ],
             [InlineKeyboardButton("✍️ Custom percentage", callback_data="risk:custom")],
         ]
         await query.edit_message_text(
             "Choose your preferred risk percentage.\n\n"
-            "You can select a preset or enter a custom value from 0.1% to 5%. "
+            "You can select a preset or enter a custom value from 0.1% to 20%. "
             "This setting is a planning preference only; the bot does not "
-            "calculate broker lot sizes or place trades.",
+            "calculate broker lot sizes or place trades. Risking 20% on one "
+            "trade is extremely aggressive and can cause rapid account losses.",
             reply_markup=InlineKeyboardMarkup(rows),
         )
         return
@@ -1150,7 +1176,7 @@ async def handle_callback(update, context):
         await query.edit_message_text(
             "✍️ Send your custom risk percentage as a number.\n\n"
             "Examples: 0.75, 1.25, or 1.5\n"
-            "Allowed range: 0.1% to 5%.\n\n"
+            "Allowed range: 0.1% to 20%.\n\n"
             "Type cancel to leave this setting unchanged."
         )
         return
@@ -1170,7 +1196,8 @@ async def handle_callback(update, context):
         await query.edit_message_text(
             f"Risk preference updated to {risk:g}%.\n\n"
             "This is a sizing preference, not a fixed lot size. "
-            "Always calculate lot size after choosing a valid technical stop loss."
+            "Always calculate lot size after choosing a valid technical stop loss. "
+            "Risking 20% on one trade is extremely aggressive and can cause rapid losses."
         )
         return
 
@@ -1192,12 +1219,12 @@ async def handle_text(update, context):
         except ValueError:
             await update.message.reply_text(
                 "Please enter a valid number, for example 0.75 or 1.25. "
-                "Allowed range: 0.1% to 5%."
+                "Allowed range: 0.1% to 20%."
             )
             return
-        if not 0.1 <= risk <= 5.0:
+        if not 0.1 <= risk <= 20.0:
             await update.message.reply_text(
-                "That value is outside the allowed range. Enter 0.1% to 5%."
+                "That value is outside the allowed range. Enter 0.1% to 20%."
             )
             return
         state.update_user_setting(_user_id(update), "risk_percent", risk)
@@ -1206,7 +1233,8 @@ async def handle_text(update, context):
             f"✅ Custom risk preference saved: {risk:g}%.\n\n"
             "This is a planning preference, not a broker order or automatic "
             "lot-size calculation. Always calculate position size from your "
-            "account balance and technical stop-loss distance.",
+            "account balance and technical stop-loss distance. Risking 20% "
+            "on one trade is extremely aggressive and can cause rapid losses.",
             reply_markup=MENU,
         )
         return
