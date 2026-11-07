@@ -68,12 +68,21 @@ def _higher_is_better(title: str):
     return None
 
 
+def _clean_value(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in {"", "none", "null", "n/a", "-"}:
+        return None
+    return text
+
+
 def _consensus(row):
-    consensus = str(row.get("Forecast") or "").strip()
-    if consensus:
+    consensus = _clean_value(row.get("Forecast"))
+    if consensus is not None:
         return consensus, "market_consensus"
-    provider = str(row.get("TEForecast") or "").strip()
-    if provider:
+    provider = _clean_value(row.get("TEForecast"))
+    if provider is not None:
         return provider, "provider_model_estimate"
     return None, "not_supplied"
 
@@ -140,8 +149,8 @@ async def fetch_calendar_events(days_ahead: int = 30) -> list[dict]:
                 None,
             )
         forecast, forecast_type = _consensus(row)
-        previous = str(row.get("Previous") or "").strip() or None
-        revised = str(row.get("Revised") or "").strip() or None
+        previous = _clean_value(row.get("Previous"))
+        revised = _clean_value(row.get("Revised"))
         if existing is None:
             existing = ee.create_event(
                 title, when, currency=currency, impact="high",
@@ -166,7 +175,7 @@ async def fetch_calendar_events(days_ahead: int = 30) -> list[dict]:
             "higher_is_better": _higher_is_better(title),
         })
         ee.save_event(existing)
-        actual = str(row.get("Actual") or "").strip()
+        actual = _clean_value(row.get("Actual"))
         if actual and not existing.get("post_event_report"):
             ee.record_actual(
                 existing["id"], actual,
@@ -198,13 +207,13 @@ async def fetch_event_snapshot(event: dict) -> dict | None:
         return None
     row = rows[0]
     consensus, forecast_type = _consensus(row)
-    actual = str(row.get("Actual") or "").strip()
+    actual = _clean_value(row.get("Actual"))
     return {
         "value": actual or None,
         "forecast": consensus,
         "forecast_type": forecast_type,
-        "previous_value": str(row.get("Previous") or "").strip() or None,
-        "revised_previous": str(row.get("Revised") or "").strip() or None,
+        "previous_value": _clean_value(row.get("Previous")),
+        "revised_previous": _clean_value(row.get("Revised")),
         "higher_is_better": _higher_is_better(str(row.get("Event") or event.get("title", ""))),
         "source": "Trading Economics calendar; official source: " + str(row.get("Source") or "not specified"),
         "source_url": row.get("SourceURL"),
