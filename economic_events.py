@@ -102,7 +102,7 @@ def _to_number(value):
     if isinstance(value, (int, float)):
         return float(value)
     text = str(value).strip().replace(",", "").upper()
-    match = re.search(r"[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)\\s*([KMBT]?)", text)
+    match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)\s*([KMBT]?)", text)
     if not match:
         return None
     number = float(match.group(0).rstrip("KMBT").strip())
