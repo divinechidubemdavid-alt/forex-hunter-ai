@@ -57,7 +57,7 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
     reference = scheduled.astimezone(ET)
     ref_month = reference.month - 1 or 12
     ref_year = reference.year if reference.month > 1 else reference.year - 1
-    start_year = str(ref_year - 1)
+    start_year = str(ref_year - 2)
     end_year = str(ref_year)
     payload = {
         "seriesid": list(BLS_SERIES.values()),
@@ -83,37 +83,49 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
     except (KeyError, TypeError, ValueError):
         return None
     actual = value
+    previous_value = None
     unit = current.get("footnotes", [])
+    prior_month = ref_month - 1 or 12
+    prior_year = ref_year if ref_month > 1 else ref_year - 1
+    prior_row = by_period.get((prior_year, prior_month))
+    prior2_month = prior_month - 1 or 12
+    prior2_year = prior_year if prior_month > 1 else prior_year - 1
+    prior2_row = by_period.get((prior2_year, prior2_month))
     if kind == "payroll":
-        prior_month = ref_month - 1 or 12
-        prior_year = ref_year if ref_month > 1 else ref_year - 1
-        prior_row = by_period.get((prior_year, prior_month))
-        if not prior_row:
+        if not prior_row or not prior2_row:
             return None
-        actual = value - float(prior_row["value"].replace(",", ""))
+        prior_level = float(prior_row["value"].replace(",", ""))
+        prior2_level = float(prior2_row["value"].replace(",", ""))
+        actual = value - prior_level
+        previous_value = prior_level - prior2_level
         label = "Monthly nonfarm payroll change (thousands)"
     elif kind == "cpi":
         year_ago = by_period.get((ref_year - 1, ref_month))
-        if not year_ago:
+        prior_year_ago = by_period.get((prior_year - 1, prior_month))
+        if not year_ago or not prior_row or not prior_year_ago:
             return None
         old = float(year_ago["value"].replace(",", ""))
+        prior_old = float(prior_year_ago["value"].replace(",", ""))
         actual = (value / old - 1) * 100 if old else None
+        previous_value = (float(prior_row["value"].replace(",", "")) / prior_old - 1) * 100 if prior_old else None
         label = "CPI year-over-year change (%)"
     elif kind == "unemployment":
-        label = "Unemployment rate (%)"
-    else:
-        prior_month = ref_month - 1 or 12
-        prior_year = ref_year if ref_month > 1 else ref_year - 1
-        prior_row = by_period.get((prior_year, prior_month))
         if not prior_row:
             return None
-        old = float(prior_row["value"].replace(",", ""))
-        actual = (value / old - 1) * 100 if old else None
+        previous_value = float(prior_row["value"].replace(",", ""))
+        label = "Unemployment rate (%)"
+    else:
+        if not prior_row or not prior2_row:
+            return None
+        prior_level = float(prior_row["value"].replace(",", ""))
+        prior2_level = float(prior2_row["value"].replace(",", ""))
+        actual = (value / prior_level - 1) * 100 if prior_level else None
+        previous_value = (prior_level / prior2_level - 1) * 100 if prior2_level else None
         label = "Average hourly earnings month-over-month change (%)"
     if actual is None:
         return None
     return {
-        "value": round(actual, 4), "label": label,
+        "value": round(actual, 4), "previous_value": round(previous_value, 4) if previous_value is not None else None, "label": label,
         "series_id": wanted, "reference_period": f"{ref_year}-{ref_month:02d}",
         "source": "U.S. Bureau of Labor Statistics API",
         "source_url": "https://www.bls.gov/developers/",
