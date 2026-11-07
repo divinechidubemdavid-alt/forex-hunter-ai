@@ -258,6 +258,8 @@ def _combine(ai: dict, technical: str | None) -> dict:
             reasons.append(
                 f'{item.get("currency")} evidence: {item.get("classification")} — {item.get("explanation", "")}'
             )
+    for source in ai.get("evidence_sources", [])[:4]:
+        reasons.append("Evidence source: " + source)
     reasons.extend(ai.get("risk_factors", [])[:4])
     currency = str(ai.get("currency") or "USD").upper()
     pairs = {
