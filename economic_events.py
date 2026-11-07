@@ -170,17 +170,22 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
         if not baseline:
             record["verification"] = "NO_15M_BASELINE"
         else:
-            from economic_research import material_change
-            changed, changes = material_change(
-                baseline.get("technical_snapshot") or {},
-                technical_snapshot or {},
-            )
             record["prior_analysis"] = baseline["analysis"]
-            record["material_changes"] = changes
-            if not changed:
+            if (technical_snapshot or {}).get("status") != "AVAILABLE":
                 record["analysis"] = baseline["analysis"]
-                record["verification"] = "CONFIRMED_UNCHANGED"
+                record["verification"] = "UNAVAILABLE"
+                record["material_changes"] = []
             else:
+                from economic_research import material_change
+                changed, changes = material_change(
+                    baseline.get("technical_snapshot") or {},
+                    technical_snapshot or {},
+                )
+                record["material_changes"] = changes
+                if not changed:
+                    record["analysis"] = baseline["analysis"]
+                    record["verification"] = "CONFIRMED_UNCHANGED"
+                else:
                 record["verification"] = "DIRECTION_REVIEWED"
                 record["analysis"] = directional_analysis(
                     event, technical=technical, phase="pre-event"
