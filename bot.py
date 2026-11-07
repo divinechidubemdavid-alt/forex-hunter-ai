@@ -416,7 +416,7 @@ def _tracked_signal_keyboard(signal_id):
             callback_data=f"signal:{signal_id}",
         )],
         [InlineKeyboardButton(
-            "Stop tracking",
+            "⏹ Close / Stop tracking",
             callback_data=f"stop:{signal_id}",
         )],
     ])
@@ -527,7 +527,7 @@ async def _show_signal_detail(chat, user_id, signal_id):
     if status == "TRACKING":
         keyboard_rows.append([
             InlineKeyboardButton(
-                "Stop tracking",
+                "⏹ Close / Stop tracking",
                 callback_data=f"stop:{signal_id}",
             )
         ])
@@ -588,10 +588,10 @@ async def _show_signal_detail(chat, user_id, signal_id):
 def _performance_summary(signals):
     signals = list(signals or [])
     completed = [s for s in signals if s.get("status") in {
-        "TP3", "STOP_LOSS", "INVALIDATED", "AMBIGUOUS", "MANUALLY_STOPPED"
+        "TP3", "MANUAL_WIN", "STOP_LOSS", "INVALIDATED", "AMBIGUOUS", "MANUALLY_STOPPED"
     }]
-    eligible = [s for s in signals if s.get("status") in {"TP3", "STOP_LOSS"}]
-    wins = sum(s.get("status") == "TP3" for s in eligible)
+    eligible = [s for s in signals if s.get("status") in {"TP3", "MANUAL_WIN", "STOP_LOSS"}]
+    wins = sum(s.get("status") in {"TP3", "MANUAL_WIN"} for s in eligible)
     losses = sum(s.get("status") == "STOP_LOSS" for s in eligible)
     win_rate = wins / len(eligible) * 100 if eligible else 0
     total_r = sum(float(s.get("realised_r", 0) or 0) for s in signals
@@ -602,11 +602,11 @@ def _performance_summary(signals):
         f"Generated/tracked: {len(signals)}\n"
         f"Completed: {len(completed)}\n"
         f"Wins: {wins}  |  Losses: {losses}\n"
-        f"Win rate (TP3 vs SL): {win_rate:.1f}%\n"
+        f"Win rate (TP3 and manual TP1/TP2 closes vs SL): {win_rate:.1f}%\n"
         f"TP achievements: TP1 {tp[0]} | TP2 {tp[1]} | TP3 {tp[2]}\n"
         f"Cumulative realised R: {total_r:+.2f}R\n\n"
-        "Manually stopped, invalidated and ambiguous signals are excluded "
-        "from win/loss statistics. This is signal analytics, not broker P/L."
+        "Manual closes after TP1/TP2 count as milestone wins. Stops before TP1, invalidated "
+        "and ambiguous signals are excluded. This is signal analytics, not broker P/L."
     )
 
 
@@ -1114,18 +1114,76 @@ async def handle_callback(update, context):
 
     if data.startswith("stop:"):
         signal_id = data.split(":", 1)[1]
+        signal = state.get_signal(signal_id, user_id)
+        if not signal or signal.get("status") != "TRACKING":
+            await query.edit_message_text("This signal is no longer active or does not belong to your account.")
+            return
 
-        stopped = state.stop_tracking_signal(
-            signal_id,
-            user_id,
-        )
+        if signal.get("tp1_hit") or signal.get("tp2_hit"):
+            reached = 2 if signal.get("tp2_hit") else 1
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    f"✅ Confirm close — record TP{reached} win",
+                    callback_data=f"manualclose:{signal_id}",
+                )],
+                [InlineKeyboardButton(
+                    "↩️ Continue tracking",
+                    callback_data=f"manualcontinue:{signal_id}",
+                )],
+            ])
+            message = (
+                f"🎯 TP{reached} has already been reached.\n\n"
+                "You can secure the achieved milestone now or continue tracking "
+                "towards the next target. If you close, the history will record "
+                f"WIN — manually closed after TP{reached}. The realised R will "
+                "use the latest monitored closed-candle price, not an assumed broker fill."
+            )
+            if getattr(query.message, "photo", None):
+                await query.edit_message_caption(caption=message, reply_markup=keyboard)
+            else:
+                await query.edit_message_text(text=message, reply_markup=keyboard)
+        else:
+            stopped = state.stop_tracking_signal(signal_id, user_id)
+            message = (
+                "Tracking stopped before TP1. The record is preserved but is not counted as a win."
+                if stopped else "This signal could not be stopped. It may already be completed."
+            )
+            if getattr(query.message, "photo", None):
+                await query.edit_message_caption(caption=message)
+            else:
+                await query.edit_message_text(text=message)
+        return
 
+    if data.startswith("manualclose:"):
+        signal_id = data.split(":", 1)[1]
+        closed = state.close_signal_after_target(signal_id, user_id)
+        if not closed:
+            await query.edit_message_text("Could not close this signal. Confirm that TP1 or TP2 was reached and the signal is still tracking.")
+            return
+        reached = int(closed.get("manual_close_after_tp", 1))
+        exit_price = closed.get("manual_exit_price")
+        exit_text = f"Last monitored price: {exit_price}\n" if exit_price is not None else "Exit price: unavailable; no price has been invented.\n"
         message = (
-            "Tracking stopped. The signal history is preserved. "
-            "This is not recorded as a win or loss."
-            if stopped
-            else "This signal could not be stopped. "
-                 "It may already be completed or belong to another user."
+            f"🏆 WIN — MANUALLY CLOSED AFTER TP{reached}\n\n"
+            f"{closed.get('symbol', 'Signal')} {closed.get('direction', '')}\n"
+            f"{exit_text}Realised result estimate: {float(closed.get('realised_r', 0) or 0):+.2f}R\n\n"
+            "Saved in Signal History and Performance. This is a target-milestone record, not a broker-confirmed execution."
+        )
+        if getattr(query.message, "photo", None):
+            await query.edit_message_caption(caption=message)
+        else:
+            await query.edit_message_text(text=message)
+        return
+
+    if data.startswith("manualcontinue:"):
+        signal_id = data.split(":", 1)[1]
+        signal = state.get_signal(signal_id, user_id)
+        if not signal or signal.get("status") != "TRACKING":
+            await query.edit_message_text("This signal is no longer active.")
+            return
+        message = (
+            f"✅ Continuing to track {signal.get('symbol', 'this signal')}. "
+            "Monitoring remains active for the next target or stop-loss."
         )
         if getattr(query.message, "photo", None):
             await query.edit_message_caption(caption=message)
