@@ -23,6 +23,7 @@ from telegram.ext import (
 
 import state
 from config import MARKETS
+from market_scope import get_strong_signal_markets
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
@@ -207,10 +208,7 @@ async def _refresh_strong_signal_snapshot():
     """
     now = datetime.now(WAT)
     weekend_only = now.weekday() >= 5
-    scan_markets = (
-        ["BTC/USD"] if weekend_only and "BTC/USD" in MARKETS
-        else ([] if weekend_only else list(MARKETS))
-    )
+    scan_markets = get_strong_signal_markets(MARKETS, now.weekday())
     market_scope = "weekend_btc_only" if weekend_only else "weekday_all_markets"
 
     saved = state.get_scanner_state("strong_signals_snapshot", {}) or {}
@@ -301,9 +299,16 @@ async def _refresh_strong_signal_snapshot():
 
 async def show_strong_signals(update, context):
     user_id = _user_id(update)
+    scan_markets = get_strong_signal_markets(MARKETS, datetime.now(WAT).weekday())
+    market_scope_text = (
+        "BTC/USD only (weekend mode)"
+        if len(scan_markets) == 1 and scan_markets[0] == "BTC/USD"
+        else "all configured markets (weekday mode)"
+    )
     await update.message.reply_text(
-        "🔄 Refreshing Strong Signals across all configured markets using "
-        "the latest completed 15-minute candles. This may take a little while."
+        "🔄 Refreshing Strong Signals across "
+        f"{market_scope_text} using the latest completed 15-minute candles. "
+        "This may take a little while."
     )
 
     (
