@@ -87,8 +87,9 @@ PLACE_BROKER_ORDERS = False
 GOLD_BUDGET_SHARE = 0.50
 WEEKEND_MARKETS = ("BTC/USD",)
 
-# No automatic scanning of forex markets on weekends.
-FOREX_MARKETS = (
+# Single source of truth for session eligibility.
+# Weekday session: supported forex pairs plus Gold.
+WEEKDAY_MARKETS = (
     "EUR/USD",
     "GBP/USD",
     "USD/JPY",
@@ -96,6 +97,20 @@ FOREX_MARKETS = (
     "USD/CAD",
     "USD/CHF",
     "XAU/USD",
+)
+
+# Weekend session: Bitcoin only.
+WEEKEND_MARKETS = ("BTC/USD",)
+
+# Forex pairs are listed separately so the automatic scanner can
+# respect the normal Friday close and Sunday reopening window.
+FOREX_MARKETS = (
+    "EUR/USD",
+    "GBP/USD",
+    "USD/JPY",
+    "AUD/USD",
+    "USD/CAD",
+    "USD/CHF",
 )
 
 # Telegram menu labels.
