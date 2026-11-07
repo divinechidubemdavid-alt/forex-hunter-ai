@@ -96,6 +96,7 @@ def directional_analysis(event, technical=None, phase="pre-event"):
     actual = event.get("actual")
     previous = event.get("previous")
     basis = actual if phase == "post-event" and actual is not None else forecast
+    comparator = forecast if phase == "post-event" else previous
     currency = event.get("currency", "USD").upper()
     title = event.get("title", "Economic event")
     direction, confidence, reasons = "NEUTRAL", 35, []
@@ -104,7 +105,7 @@ def directional_analysis(event, technical=None, phase="pre-event"):
     else:
         try:
             value = float(basis)
-            prior = float(previous) if previous is not None else None
+            prior = float(comparator) if comparator is not None else None
             # Generic numeric releases cannot be interpreted without knowing whether
             # higher or lower is favourable. Require explicit event metadata.
             favourable = event.get("higher_is_better")
@@ -112,7 +113,8 @@ def directional_analysis(event, technical=None, phase="pre-event"):
                 positive = (value > prior) == bool(favourable)
                 direction = "BULLISH" if positive else "BEARISH"
                 confidence = 55
-                reasons.append(f"{'Higher' if value > prior else 'Lower'} reading versus previous ({previous}); event preference metadata applied.")
+                reference_label = 'forecast' if phase == 'post-event' else 'previous'
+                reasons.append(f"{'Higher' if value > prior else 'Lower'} reading versus {reference_label} ({comparator}); event preference metadata applied.")
             else:
                 reasons.append("Figure recorded, but its favourable direction is not defined; no directional assumption made.")
         except (TypeError, ValueError):
@@ -128,6 +130,11 @@ def directional_analysis(event, technical=None, phase="pre-event"):
             reasons.append(f"Technical context conflicts ({technical}); confidence reduced, not blocked.")
     return {
         "currency": currency, "direction": direction, "confidence": confidence,
+        "affected_markets": {
+            "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "XAU/USD"],
+            "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
+            "AUD": ["AUD/USD"], "CAD": ["USD/CAD"], "CHF": ["USD/CHF"],
+        }.get(currency, []),
         "phase": phase, "basis": "actual" if phase == "post-event" and actual is not None else ("forecast" if forecast is not None else "none"),
         "reasons": reasons, "technical_direction": technical or "NOT PROVIDED",
         "disclaimer": "Directional research, not a confirmed trade entry or guaranteed outcome.",
