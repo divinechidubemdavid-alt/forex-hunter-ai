@@ -182,13 +182,13 @@ async def show_market_scanner(update, context):
 
     if session == "weekend":
         heading = (
-            "🔎 WEEKEND MARKET ANALYSIS\\n\\n"
+            "🔎 WEEKEND MARKET ANALYSIS\n\n"
             "Bitcoin (BTC/USD) is the only enabled weekend market. "
             "Choose it below to select a timeframe."
         )
     else:
         heading = (
-            "🔎 WEEKDAY MARKET ANALYSIS\\n\\n"
+            "🔎 WEEKDAY MARKET ANALYSIS\n\n"
             "Choose a supported forex pair or Gold (XAU/USD) to analyse."
         )
 
