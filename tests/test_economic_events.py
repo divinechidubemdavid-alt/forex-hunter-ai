@@ -28,6 +28,15 @@ class EconomicEventTests(unittest.TestCase):
     def event(self, **kwargs):
         return ee.create_event("US CPI", datetime.now(timezone.utc) + timedelta(hours=25), **kwargs)
 
+    def test_checkpoint_scheduler_catches_up_brief_downtime_without_late_event_alerts(self):
+        now = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
+        event = {"scheduled_at": (now + timedelta(hours=23, minutes=45)).isoformat(), "checkpoints": {}}
+        self.assertEqual(ee.due_checkpoints(event, now), ["24h"])
+        event = {"scheduled_at": (now + timedelta(minutes=4)).isoformat(), "checkpoints": {}}
+        self.assertEqual(ee.due_checkpoints(event, now), ["5m"])
+        event = {"scheduled_at": (now + timedelta(minutes=2)).isoformat(), "checkpoints": {}}
+        self.assertEqual(ee.due_checkpoints(event, now), [])
+
     def test_create_and_list_event(self):
         item = self.event(forecast="3.1", previous="3.2")
         self.assertEqual(ee.get_event(item["id"])["title"], "US CPI")
