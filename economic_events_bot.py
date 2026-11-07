@@ -10,6 +10,7 @@ from telegram.ext import CommandHandler
 
 from chart import create_market_chart
 import economic_events as ee
+import economic_event_history as event_history
 import economic_research as research
 import trading_economics as te
 import state
@@ -24,6 +25,7 @@ def event_center_keyboard():
         [InlineKeyboardButton("➕ Add personal event", callback_data="econ:add")],
         [InlineKeyboardButton("📅 Upcoming events", callback_data="econ:upcoming"),
          InlineKeyboardButton("🗂 Event history", callback_data="econ:history")],
+        [InlineKeyboardButton("📈 Event performance", callback_data="econ:performance")],
         [InlineKeyboardButton("🔄 Sync official calendar", callback_data="econ:import")],
     ])
 
@@ -126,6 +128,24 @@ async def handle_event_callback(update, context):
         await _show_list(query.message.chat, False, user_id)
     elif data == "econ:history":
         await _show_list(query.message.chat, True, user_id)
+    elif data == "econ:performance":
+        rows = ee.list_events(include_past=True, limit=300, user_id=user_id)
+        stats = event_history.performance_summary(rows)
+        accuracy = (f'{stats["directional_accuracy_pct"]}%' if stats["directional_accuracy_pct"] is not None else "Not enough scored outcomes yet")
+        await query.message.reply_text(
+            "📈 ECONOMIC EVENT PERFORMANCE\n\n"
+            f'Events recorded: {stats["events"]}\n'
+            f'15-minute bullish forecasts: {stats["bullish"]}\n'
+            f'15-minute bearish forecasts: {stats["bearish"]}\n'
+            f'No clear direction / other: {stats["no_clear_direction"]}\n'
+            f'Not yet finalized: {stats["not_finalized"]}\n'
+            f'Directional accuracy: {accuracy} ({stats["directional_correct"]}/{stats["directional_scored"]} scored events)\n'
+            f'Trade outcomes recorded: {stats["trades_scored"]}\n'
+            f'Trade wins/losses: {stats["trade_wins"]}/{stats["trade_losses"]}\n'
+            f'Net recorded performance: {stats["net_r"]:+.2f}R\n'
+            f'Unscored events: {stats["unscored"]}\n\n'
+            "Accuracy uses the latest recorded post-release market-reaction snapshot. Trade R is shown only when a trade outcome has actually been recorded. Missing evidence is never counted as a win or loss."
+        )
     elif data == "econ:import":
         try:
             total, source = await _sync_calendars()
@@ -178,7 +198,16 @@ async def handle_event_callback(update, context):
                 )
                 + "\n" + "\n".join("• " + x for x in analysis["reasons"])
             )
-            await query.message.reply_photo(photo=photo, caption=caption[:1020])
+            sent_chart = await query.message.reply_photo(photo=photo, caption=caption[:1020])
+            if sent_chart.photo:
+                event.setdefault("chart_images", []).append({
+                    "file_id": sent_chart.photo[-1].file_id,
+                    "checkpoint": "post_event_report",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "event_id": event_id,
+                })
+                event["chart_images"] = event["chart_images"][-20:]
+                ee.save_event(event)
             return
         report = event.get("post_event_report")
         checkpoints = event.get("checkpoints", {})
@@ -216,8 +245,31 @@ async def handle_event_callback(update, context):
             + ("\n\n10Y YIELDS:\n" + yields_text if yields_text else "")
             + ("\n\nPost-release report: available." if report else "\n\nPost-release report: awaiting official actual data.")
         )
-        photo = ee.render_event_chart(event, analysis)
-        await query.message.reply_photo(photo=photo, caption=caption[:1020])
+        saved_chart = (event.get("chart_images") or [])
+        photo = saved_chart[-1].get("file_id") if saved_chart else ee.render_event_chart(event, analysis)
+        sent_chart = await query.message.reply_photo(photo=photo, caption=caption[:1020])
+        if sent_chart.photo:
+            event.setdefault("chart_images", []).append({
+                "file_id": sent_chart.photo[-1].file_id,
+                "checkpoint": "history_view",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "event_id": event_id,
+            })
+            event["chart_images"] = event["chart_images"][-20:]
+            ee.save_event(event)
+        conversation = event_history.event_conversation(event)
+        if conversation:
+            lines = []
+            for item in conversation[-12:]:
+                line = f'{item["stage"]}: {item["direction"]}'
+                if item.get("confidence") is not None:
+                    line += f' ({item["confidence"]}/100)'
+                if item.get("verification"):
+                    line += f' — {item["verification"]}'
+                if item.get("summary"):
+                    line += f'\n{item["summary"][:220]}'
+                lines.append(line)
+            await query.message.reply_text("🧠 SAVED EVENT RESEARCH / AI HISTORY\n\n" + "\n\n".join(lines))
         await query.message.reply_text(
             "Event actions:",
             reply_markup=InlineKeyboardMarkup([
@@ -414,7 +466,18 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         try:
             if hasattr(photo, "seek"):
                 photo.seek(0)
-            await application.bot.send_photo(chat_id=int(user_id), photo=photo, caption=text[:1020])
+            sent = await application.bot.send_photo(chat_id=int(user_id), photo=photo, caption=text[:1020])
+            if sent.photo:
+                latest = ee.get_event(event["id"]) or event
+                latest.setdefault("chart_images", []).append({
+                    "file_id": sent.photo[-1].file_id,
+                    "checkpoint": checkpoint,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "market": snapshot.get("market"),
+                    "timeframe": snapshot.get("timeframe"),
+                })
+                latest["chart_images"] = latest["chart_images"][-20:]
+                ee.save_event(latest)
         except Exception:
             log.exception("Could not deliver economic event alert to user %s", user_id)
 

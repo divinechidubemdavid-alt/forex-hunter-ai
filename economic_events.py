@@ -451,9 +451,24 @@ async def fetch_ics_events(url=None):
         return []
     if not feed_url.startswith("https://"):
         raise ValueError("Economic calendar feed must use HTTPS.")
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    headers = {
+        "User-Agent": "ForexHunterAI/1.0 (economic calendar importer)",
+        "Accept": "text/calendar, text/plain;q=0.9, */*;q=0.8",
+    }
+    async with httpx.AsyncClient(
+        timeout=20, follow_redirects=True, headers=headers
+    ) as client:
         response = await client.get(feed_url)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 403:
+                raise RuntimeError(
+                    "BLS calendar access was denied (HTTP 403). The importer identified "
+                    "itself with a descriptive User-Agent; continue using the independent "
+                    "Federal Reserve and BEA calendar sources and retry BLS on a later sync."
+                ) from exc
+            raise
     text = response.text.replace("\r\n ", "").replace("\n ", "")
     blocks = re.findall(r"BEGIN:VEVENT(.*?)END:VEVENT", text, re.S)
     imported = []
