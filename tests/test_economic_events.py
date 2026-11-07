@@ -183,6 +183,26 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(actual["revised_previous"], "175K")
         self.assertEqual(actual["higher_is_better"], True)
 
+    def test_bls_state_unemployment_is_not_misclassified_as_national_event(self):
+        self.assertFalse(ee.is_high_impact("State Employment and Unemployment (Monthly)"))
+        self.assertTrue(ee.is_high_impact("Employment Situation for October"))
+        self.assertTrue(ee.is_high_impact("Unemployment Rate"))
+
+    def test_companion_labour_metrics_adjust_post_release_confidence(self):
+        item = self.event(forecast="180K", previous="175K")
+        item["higher_is_better"] = True
+        item["actual_details"] = {
+            "metrics": [{
+                "name": "Unemployment rate", "value": 4.4,
+                "previous_value": 4.3, "higher_is_better": False,
+            }]
+        }
+        ee.save_event(item)
+        report = ee.record_actual(item["id"], "190K")
+        self.assertEqual(report["analysis"]["direction"], "BULLISH")
+        self.assertLess(report["analysis"]["confidence"], 55)
+        self.assertTrue(any("Companion Unemployment rate" in reason for reason in report["analysis"]["reasons"]))
+
     def test_provider_values_support_units(self):
         self.assertEqual(ee._to_number("175K"), 175000)
         self.assertEqual(ee._to_number("4.2%"), 4.2)
