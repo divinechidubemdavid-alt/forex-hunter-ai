@@ -180,7 +180,8 @@ async def fetch_calendar_events(days_ahead: int = 30) -> list[dict]:
     return imported
 
 
-async def fetch_event_actual(event: dict) -> dict | None:
+async def fetch_event_snapshot(event: dict) -> dict | None:
+    """Refresh consensus, previous/revision and actual fields for one provider event."""
     calendar_id = str(event.get("provider_calendar_id") or "")
     if not configured() or not calendar_id:
         return None
@@ -190,16 +191,14 @@ async def fetch_event_actual(event: dict) -> dict | None:
     if not rows:
         return None
     row = rows[0]
-    actual = str(row.get("Actual") or "").strip()
-    if not actual:
-        return None
     consensus, forecast_type = _consensus(row)
+    actual = str(row.get("Actual") or "").strip()
     return {
-        "value": actual,
-        "previous_value": str(row.get("Previous") or "").strip() or None,
-        "revised_previous": str(row.get("Revised") or "").strip() or None,
+        "value": actual or None,
         "forecast": consensus,
         "forecast_type": forecast_type,
+        "previous_value": str(row.get("Previous") or "").strip() or None,
+        "revised_previous": str(row.get("Revised") or "").strip() or None,
         "higher_is_better": _higher_is_better(str(row.get("Event") or event.get("title", ""))),
         "source": "Trading Economics calendar; official source: " + str(row.get("Source") or "not specified"),
         "source_url": row.get("SourceURL"),
@@ -207,6 +206,14 @@ async def fetch_event_actual(event: dict) -> dict | None:
         "calendar_id": calendar_id,
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+async def fetch_event_actual(event: dict) -> dict | None:
+    """Return an actual only after the provider publishes a non-empty value."""
+    snapshot = await fetch_event_snapshot(event)
+    if not snapshot or not snapshot.get("value"):
+        return None
+    return snapshot
 
 
 async def fetch_bond_yield_context(event: dict) -> list[dict]:
