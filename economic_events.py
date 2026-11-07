@@ -11,13 +11,35 @@ import re
 import html
 import uuid
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
 import state
 
 WAT = ZoneInfo("Africa/Lagos")
+
+# Some official ICS feeds use legacy TZID aliases that are not shipped by
+# minimal Linux containers or the Python tzdata wheel. Normalize them to
+# canonical IANA names before constructing ZoneInfo.
+_LEGACY_TZID_ALIASES = {
+    "US-Eastern": "America/New_York",
+    "US/Eastern": "America/New_York",
+    "EST5EDT": "America/New_York",
+    "US-Central": "America/Chicago",
+    "US/Mountain": "America/Denver",
+    "US-Pacific": "America/Los_Angeles",
+}
+
+
+def _ics_timezone(zone_name):
+    """Resolve an ICS TZID, including common legacy US timezone aliases."""
+    canonical_name = _LEGACY_TZID_ALIASES.get(str(zone_name).strip(), str(zone_name).strip())
+    try:
+        return ZoneInfo(canonical_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unsupported or unavailable ICS timezone: {zone_name}") from exc
+
 CHECKPOINTS = (("24h", timedelta(hours=24)), ("1h", timedelta(hours=1)),
                ("15m", timedelta(minutes=15)), ("5m", timedelta(minutes=5)))
 HIGH_IMPACT_TERMS = (
@@ -492,7 +514,7 @@ async def fetch_ics_events(url=None):
             elif re.fullmatch(r"\d{8}T\d{6}", raw):
                 zone_name = fields.get("DTSTART_TZID", "UTC")
                 when = datetime.strptime(raw, "%Y%m%dT%H%M%S").replace(
-                    tzinfo=ZoneInfo(zone_name)
+                    tzinfo=_ics_timezone(zone_name)
                 ).astimezone(timezone.utc)
             else:
                 when = datetime.strptime(raw, "%Y%m%d").replace(tzinfo=timezone.utc)
