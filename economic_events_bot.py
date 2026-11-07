@@ -180,11 +180,16 @@ async def handle_event_callback(update, context):
             )
             await query.message.reply_photo(photo=photo, caption=caption[:1020])
             return
-        analysis = ee.directional_analysis(
-            event, phase="post-event" if event.get("actual") is not None else "pre-event"
-        )
         report = event.get("post_event_report")
         checkpoints = event.get("checkpoints", {})
+        if report:
+            analysis = report.get("analysis") or ee.directional_analysis(event, phase="post-event")
+        elif checkpoints.get("5m"):
+            analysis = checkpoints["5m"].get("analysis") or ee.directional_analysis(event)
+        elif checkpoints.get("15m"):
+            analysis = checkpoints["15m"].get("analysis") or ee.directional_analysis(event)
+        else:
+            analysis = ee.directional_analysis(event)
         checkpoint_text = "\n".join(
             f'{name}: {item.get("verification", item.get("analysis", {}).get("direction", "saved"))}'
             for name, item in checkpoints.items()
