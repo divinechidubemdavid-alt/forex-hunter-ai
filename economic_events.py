@@ -231,6 +231,7 @@ def _event_evidence(event):
         "forecast_type": event.get("forecast_type"),
         "previous": event.get("previous"),
         "actual": event.get("actual"),
+        "provider_context_status": event.get("provider_context_status", "NOT_CONFIGURED"),
         "news_titles": sorted({
             str(item.get("title", "")).strip()
             for item in event.get("research_news", [])
@@ -249,6 +250,11 @@ def _material_event_change(previous, current):
         changes.append("event schedule details changed")
     if previous.get("actual") is None and current.get("actual") is not None:
         changes.append("actual release figure became available")
+    if (
+        previous.get("provider_context_status") != current.get("provider_context_status")
+        and current.get("provider_context_status") in {"AVAILABLE", "OFFICIAL_FALLBACK"}
+    ):
+        changes.append("fresh economic/news context became available")
     if previous.get("previous") != current.get("previous"):
         changes.append("previous-period figure or revision changed")
     old_forecast = previous.get("forecast")
@@ -306,12 +312,20 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
                 _, technical_changes = material_change(baseline_technical, current_technical)
             changes = event_changes + technical_changes
             record["material_changes"] = changes
-            if not technical_available and not event_changes:
+            provider_status = current_event_evidence.get("provider_context_status", "NOT_CONFIGURED")
+            if (
+                (not technical_available or provider_status == "UNAVAILABLE")
+                and not event_changes
+            ):
                 record["analysis"] = baseline["analysis"]
                 record["verification"] = "UNAVAILABLE"
             elif not changes:
                 record["analysis"] = baseline["analysis"]
-                record["verification"] = "CONFIRMED_UNCHANGED"
+                record["verification"] = (
+                    "TECHNICAL_ONLY_CONFIRMED"
+                    if provider_status == "NOT_CONFIGURED"
+                    else "CONFIRMED_UNCHANGED"
+                )
             else:
                 record["analysis"] = directional_analysis(event, technical=technical, phase=phase)
                 old_direction = baseline["analysis"].get(
