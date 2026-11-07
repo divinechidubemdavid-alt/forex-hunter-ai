@@ -516,7 +516,7 @@ async def economic_events_loop(application):
 
 async def show_my_telegram_id(update, context):
     await update.effective_message.reply_text(
-        f"Your Telegram user ID is: {update.effective_user.id}\\n"
+        f"Your Telegram user ID is: {update.effective_user.id}\n"
         "Set BOT_OWNER_ID to this value in the host environment only if you need to manually edit shared official event records."
     )
 
