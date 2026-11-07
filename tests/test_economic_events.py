@@ -50,6 +50,14 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(verified["verification"], "CONFIRMED_UNCHANGED")
         self.assertEqual(verified["analysis"], baseline["analysis"])
 
+    def test_5m_does_not_claim_confirmation_without_fresh_market_data(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
+        baseline = ee.record_checkpoint(item["id"], "15m", technical="BULLISH", technical_snapshot=baseline_snapshot)
+        verified = ee.record_checkpoint(item["id"], "5m", technical_snapshot={"status": "UNAVAILABLE", "reason": "provider timeout"})
+        self.assertEqual(verified["verification"], "UNAVAILABLE")
+        self.assertEqual(verified["analysis"], baseline["analysis"])
+
     def test_5m_revises_only_after_material_market_change(self):
         item = self.event(forecast="3.1", previous="3.2")
         baseline_snapshot = {"status": "AVAILABLE", "direction": "BULLISH", "adx": 25, "breakout": "NONE", "volatility_pct": 0.2}
