@@ -338,7 +338,7 @@ async def fetch_fomc_events():
     imported = []
     sections = [
         match.group(0) for match in re.finditer(
-            r"<h[1-6][^>]*>\\s*20\\d{2} FOMC Meetings.*?(?=<h[1-6][^>]*>\\s*20\\d{2} FOMC Meetings|$)",
+            r"<h[1-6][^>]*>\s*20\d{2} FOMC Meetings.*?(?=<h[1-6][^>]*>\s*20\d{2} FOMC Meetings|$)",
             page, re.I | re.S,
         )
     ]
@@ -352,13 +352,13 @@ async def fetch_fomc_events():
         for event in list_events(True, 300)
     }
     for section in sections:
-        year_text = re.search(r"<h[1-6][^>]*>\\s*(20\\d{2}) FOMC Meetings", section, re.I)
+        year_text = re.search(r"<h[1-6][^>]*>\s*(20\d{2}) FOMC Meetings", section, re.I)
         if not year_text:
             continue
         year = int(year_text.group(1))
         text = re.sub(r"<[^>]+>", " ", section)
-        text = re.sub(r"\\s+", " ", html.unescape(text))
-        pattern = r"\\b(" + "|".join(month_numbers) + r")\\s+(\\d{1,2})\\s*[-–]\\s*(\\d{1,2})\\b"
+        text = re.sub(r"\s+", " ", html.unescape(text))
+        pattern = r"\b(" + "|".join(month_numbers) + r")\s+(\d{1,2})\s*[-–]\s*(\d{1,2})\b"
         for match in re.finditer(pattern, text, re.I):
             month = month_numbers[match.group(1).lower()]
             decision_day = int(match.group(3))
@@ -396,14 +396,14 @@ async def fetch_bea_events():
         if len(cells) < 3:
             continue
         values = [
-            re.sub(r"\\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", cell))).strip()
+            re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", cell))).strip()
             for cell in cells
         ]
         date_match = re.search(
-            r"\\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+(\\d{1,2})\\b",
+            r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})\b",
             values[0], re.I,
         )
-        time_match = re.search(r"\\b(\\d{1,2}:\\d{2})\\s*(AM|PM)\\b", values[0], re.I)
+        time_match = re.search(r"\b(\d{1,2}:\d{2})\s*(AM|PM)\b", values[0], re.I)
         title = values[2]
         if not date_match or not time_match or not is_high_impact(title):
             continue
