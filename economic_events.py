@@ -230,7 +230,10 @@ async def fetch_ics_events(url=None):
             if ":" not in line:
                 continue
             key, value = line.split(":", 1)
-            fields[key.split(";", 1)[0]] = value.strip()
+            field_name = key.split(";", 1)[0]
+            fields[field_name] = value.strip()
+            if field_name == "DTSTART" and "TZID=" in key:
+                fields["DTSTART_TZID"] = key.split("TZID=", 1)[1].split(";", 1)[0]
         title = fields.get("SUMMARY", "").strip()
         raw = fields.get("DTSTART", "")
         if not title or not raw or not is_high_impact(title):
@@ -239,13 +242,16 @@ async def fetch_ics_events(url=None):
             if re.fullmatch(r"\d{8}T\d{6}Z", raw):
                 when = datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
             elif re.fullmatch(r"\d{8}T\d{6}", raw):
-                when = datetime.strptime(raw, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+                zone_name = fields.get("DTSTART_TZID", "UTC")
+                when = datetime.strptime(raw, "%Y%m%dT%H%M%S").replace(
+                    tzinfo=ZoneInfo(zone_name)
+                ).astimezone(timezone.utc)
             else:
                 when = datetime.strptime(raw, "%Y%m%d").replace(tzinfo=timezone.utc)
-            key = (title, when.isoformat())
-            existing = {(e["title"], e["scheduled_at"]) for e in list_events(True, 300)}
+            key = (title.casefold(), when.isoformat())
+            existing = {(e["title"].casefold(), e["scheduled_at"]) for e in list_events(True, 300)}
             if key not in existing:
-                imported.append(create_event(title, when, source=feed_url))
+                imported.append(create_event(title, when, currency="USD", source=feed_url))
         except ValueError:
             continue
     return imported
