@@ -405,16 +405,26 @@ def record_market_reaction(event_id, snapshot, minutes_after):
         "source": snapshot.get("source", "unavailable"),
     }
     report.setdefault("market_reactions", []).append(reaction)
-    fundamental = report.get("analysis", {}).get("direction")
-    observed = reaction["direction"]
-    if fundamental in {"BULLISH", "BEARISH"} and observed in {"BULLISH", "BEARISH"}:
+    expected = report.get("analysis", {}).get(
+        "combined_direction", report.get("analysis", {}).get("direction")
+    )
+    scored = [
+        item for item in report.get("market_reactions", [])
+        if item.get("direction") in {"BULLISH", "BEARISH"}
+    ]
+    if expected in {"BULLISH", "BEARISH"} and scored:
+        matches = sum(1 for item in scored if item["direction"] == expected)
+        total = len(scored)
+        ratio = matches / total
+        percent = round(ratio * 100)
         if report.get("forecast") is None:
-            report["forecast_score"] = "DIRECTIONAL_ALIGNMENT_ONLY" if fundamental == observed else "DIRECTIONAL_CONFLICT"
+            prefix = "Directional alignment only"
         elif report.get("forecast_type") in {"model_estimate", "provider_model_estimate"}:
-            report["forecast_score"] = "MODEL_ESTIMATE_ALIGNED" if fundamental == observed else "MODEL_ESTIMATE_NOT_ALIGNED"
+            prefix = "Model-estimate alignment"
         else:
-            report["forecast_score"] = "ALIGNED" if fundamental == observed else "NOT_ALIGNED"
-        report["forecast_score_value"] = 1 if fundamental == observed else 0
+            prefix = "Consensus-forecast alignment"
+        report["forecast_score"] = f"{prefix}: {matches}/{total} windows ({percent}%)"
+        report["forecast_score_value"] = ratio
     else:
         report["forecast_score"] = "UNSCORED"
         report["forecast_score_value"] = None
