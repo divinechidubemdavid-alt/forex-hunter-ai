@@ -314,10 +314,42 @@ async def _check_trend_warning(app, user_id, signal, frame):
         {"candle_time": warning["candle_time"]},
     )
     settings = state.get_user_settings(user_id) or {}
-    await _notify(
-        app, user_id, settings, "trend_warning",
-        f"⚠️ {signal.get('symbol', 'Tracked signal')} — {warning['message']}",
-    )
+    mode = str(settings.get("tracking_notification_mode", "silent")).lower()
+    if mode == "silent" or (mode == "important" and "trend_warning" not in {"tp1", "tp2", "tp3", "stop_loss", "trend_warning"}):
+        return
+    if mode not in {"important", "all"}:
+        return
+
+    # Send the weakening-trend warning with its own fresh chart snapshot.
+    timeframe = str(signal.get("timeframe") or "15m")
+    try:
+        chart = create_market_chart(
+            frame,
+            signal.get("symbol", "Unknown"),
+            timeframe,
+            entry=signal.get("entry"),
+            stop_loss=signal.get("stop_loss"),
+            take_profits=_targets(signal),
+        )
+        chart.seek(0)
+        latest = float(frame["close"].iloc[-1])
+        caption = (
+            f"⚠️ TREND WEAKENING / REVERSAL RISK\n"
+            f"{signal.get('symbol', 'Tracked signal')} — {signal.get('direction', '')}\n"
+            f"Signal #{signal_id} | {timeframe.upper()}\n"
+            f"Latest closed-candle price: {latest:g}\n"
+            f"{warning['message']}\n\n"
+            "Chart shows the latest completed candles and saved trade levels. "
+            "This is a warning, not a confirmed reversal."
+        )[:950]
+        await app.bot.send_photo(chat_id=int(user_id), photo=chart, caption=caption)
+    except Exception:
+        logger.exception("Could not send trend-warning chart for signal %s.", signal_id)
+        await _notify(
+            app, user_id, settings, "trend_warning",
+            f"⚠️ {signal.get('symbol', 'Tracked signal')} — {warning['message']}\n"
+            "⚠️ Warning chart could not be generated this time.",
+        )
 
 
 async def _refresh_saved_chart(app, user_id, signal, frame):
