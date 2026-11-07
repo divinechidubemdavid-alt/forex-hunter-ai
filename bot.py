@@ -602,7 +602,7 @@ def _performance_summary(signals):
         f"Generated/tracked: {len(signals)}\n"
         f"Completed: {len(completed)}\n"
         f"Wins: {wins}  |  Losses: {losses}\n"
-        f"Win rate (TP3 vs SL): {win_rate:.1f}%\n"
+        f"Win rate (TP3 and manual TP1/TP2 closes vs SL): {win_rate:.1f}%\n"
         f"TP achievements: TP1 {tp[0]} | TP2 {tp[1]} | TP3 {tp[2]}\n"
         f"Cumulative realised R: {total_r:+.2f}R\n\n"
         "Manually stopped, invalidated and ambiguous signals are excluded "
