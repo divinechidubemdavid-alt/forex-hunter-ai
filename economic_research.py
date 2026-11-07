@@ -278,5 +278,14 @@ def material_change(baseline: dict, current: dict) -> tuple[bool, list[str]]:
     return bool(changes), changes
 
 async def auto_actual_release(event: dict) -> dict | None:
-    """Official BLS actuals only; unsupported releases return None for safe fallback."""
+    """Prefer licensed global calendar actuals; fall back to official BLS API."""
+    try:
+        import trading_economics
+        if trading_economics.configured() and event.get("provider_calendar_id"):
+            result = await trading_economics.fetch_event_actual(event)
+            if result:
+                return result
+    except Exception:
+        # Do not silently invent or replace an official value; try the supported BLS source.
+        pass
     return await fetch_bls_release_actual(event)
