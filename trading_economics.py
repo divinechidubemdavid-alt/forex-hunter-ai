@@ -50,10 +50,10 @@ def _dt(value: str) -> datetime:
 def _higher_is_better(title: str):
     name = title.lower()
     lower_is_better = (
-        "inflation", "consumer price", "cpi", "pce price", "ppi",
         "unemployment", "jobless claims", "initial claims",
     )
     higher_is_better = (
+        "inflation", "consumer price", "cpi", "pce price", "ppi",
         "non farm payroll", "nonfarm payroll", "employment change",
         "employment situation", "retail sales", "gdp", "pmi",
         "hourly earnings", "wage", "consumer confidence", "industrial production",
