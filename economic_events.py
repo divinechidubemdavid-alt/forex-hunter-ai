@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import html
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -257,6 +258,54 @@ async def fetch_ics_events(url=None):
                 imported.append(create_event(title, when, currency="USD", source=feed_url))
         except ValueError:
             continue
+    return imported
+
+
+async def fetch_fomc_events():
+    """Import scheduled FOMC decision dates from the Federal Reserve's official calendar."""
+    url = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+    page = html.unescape(response.text)
+    imported = []
+    sections = re.findall(
+        r"<h[1-6][^>]*>\\s*(20\\d{2}) FOMC Meetings.*?(?=<h[1-6][^>]*>\\s*20\\d{2} FOMC Meetings|$)",
+        page, re.I | re.S,
+    )
+    month_numbers = {
+        "january": 1, "february": 2, "march": 3, "april": 4,
+        "may": 5, "june": 6, "july": 7, "august": 8,
+        "september": 9, "october": 10, "november": 11, "december": 12,
+    }
+    existing = {
+        (event["title"].casefold(), event["scheduled_at"])
+        for event in list_events(True, 300)
+    }
+    for section in sections:
+        year_text = re.search(r"<h[1-6][^>]*>\\s*(20\\d{2}) FOMC Meetings", section, re.I)
+        if not year_text:
+            continue
+        year = int(year_text.group(1))
+        text = re.sub(r"<[^>]+>", " ", section)
+        text = re.sub(r"\\s+", " ", html.unescape(text))
+        pattern = r"\\b(" + "|".join(month_numbers) + r")\\s+(\\d{1,2})\\s*[-–]\\s*(\\d{1,2})\\b"
+        for match in re.finditer(pattern, text, re.I):
+            month = month_numbers[match.group(1).lower()]
+            decision_day = int(match.group(3))
+            try:
+                local = datetime(year, month, decision_day, 14, 0, tzinfo=ZoneInfo("America/New_York"))
+            except ValueError:
+                continue
+            title = "FOMC Rate Decision and Policy Statement"
+            when = local.astimezone(timezone.utc)
+            key = (title.casefold(), when.isoformat())
+            if key not in existing and when >= _now() - timedelta(days=2):
+                imported.append(create_event(
+                    title, when, currency="USD", impact="high",
+                    source="Federal Reserve official FOMC calendar",
+                ))
+                existing.add(key)
     return imported
 
 
