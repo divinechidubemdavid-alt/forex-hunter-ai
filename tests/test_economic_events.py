@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import economic_events as ee
 import trading_economics as te
-import economic_research as er
 
 
 class EconomicEventTests(unittest.TestCase):
