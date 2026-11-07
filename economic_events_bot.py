@@ -301,6 +301,11 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f'• {item.get("title", "Headline")}: {item.get("description", "")[:180]}'
         for item in event.get("research_news", [])[:3]
     )
+    yield_lines = "\n".join(
+        f'{item.get("country")}: 10Y {item.get("yield_pct")}% '
+        f'(daily {item.get("daily_change")}, weekly {item.get("weekly_change")})'
+        for item in event.get("bond_yield_context", [])
+    )
     text = (
         f'🚨 ECONOMIC EVENT — {checkpoint.upper()} CHECKPOINT\n\n'
         f'{event["title"]}\nEvent time: {scheduled:%d %b %Y, %H:%M} WAT\n'
@@ -310,6 +315,7 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f'Technical: {technical_text}\n\nAffected market bias:\n{market_lines}\n\n'
         + "\n".join("• " + reason for reason in analysis["reasons"])
         + ("\n\nLATEST ECONOMIC NEWS:\n" + news_lines if news_lines else "")
+        + ("\n\n10Y GOVERNMENT BOND YIELDS:\n" + yield_lines if yield_lines else "")
     )
     if checkpoint == "5m":
         if record.get("verification") == "CONFIRMED_UNCHANGED":
@@ -390,10 +396,13 @@ async def economic_events_loop(application):
                     if checkpoint in {"24h", "1h"} and te.configured():
                         try:
                             news = await te.fetch_event_news(event, limit=3)
+                            yields = await te.fetch_bond_yield_context(event)
                             if news:
                                 event["research_news"] = news
-                                event["research_news_checked_at"] = datetime.now(timezone.utc).isoformat()
-                                ee.save_event(event)
+                            if yields:
+                                event["bond_yield_context"] = yields
+                            event["provider_context_checked_at"] = datetime.now(timezone.utc).isoformat()
+                            ee.save_event(event)
                         except Exception:
                             log.exception("Economic news research unavailable for %s", event.get("title"))
                     event = ee.get_event(event["id"]) or event
