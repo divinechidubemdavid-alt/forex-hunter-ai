@@ -95,8 +95,8 @@ async def handle_event_callback(update, context):
             bea = await ee.fetch_bea_events()
             total = len(imported) + len(fomc) + len(bea)
             await query.message.reply_text(
-                f"Official BLS and Federal Reserve calendar sync complete: {total} new high-impact event(s)."
-                if imported else "Official BLS calendar is up to date; no new high-impact events were added."
+                f"Official BLS, Federal Reserve and BEA calendar sync complete: {total} new high-impact event(s)."
+                if total else "Official calendars are up to date; no new high-impact events were added."
             )
         except Exception as exc:
             log.exception("Official calendar import failed")
@@ -271,8 +271,10 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
             text += "\n\n15-MINUTE FORECAST CONFIRMED — UNCHANGED."
         elif record.get("verification") == "DIRECTION_REVIEWED":
             text += "\n\nDIRECTION REVISED — NEW MATERIAL TECHNICAL EVIDENCE DETECTED."
-        else:
+        elif record.get("verification") == "NO_15M_BASELINE":
             text += "\n\n5-MINUTE VERIFICATION INCOMPLETE — NO 15-MINUTE BASELINE."
+        elif record.get("verification") == "UNAVAILABLE":
+            text += "\n\nFRESH MARKET DATA UNAVAILABLE — ORIGINAL 15-MINUTE FORECAST PRESERVED, NOT CONFIRMED."
     photo = market_chart or ee.render_event_chart(event, analysis)
     recipients = [event["owner_id"]] if event.get("owner_id") else state.get_users()
     for user_id in recipients:
