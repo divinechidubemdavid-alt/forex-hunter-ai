@@ -49,7 +49,7 @@ def _event_text(event):
         f'Time: {when:%a %d %b %Y, %H:%M} WAT\n'
         f'Forecast ({forecast_label}): {forecast if forecast is not None else "Not supplied"} | '
         f'Previous: {event.get("previous") or "Not supplied"}\n'
-        f'Source: {event.get("source", "unknown")}\n'
+        f'Source: {event.get("provider_source", event.get("source", "unknown"))}\n'
         f'Status: {event.get("status", "scheduled").upper()}'
     )
 
@@ -272,6 +272,10 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         if snapshot.get("status") == "AVAILABLE" else
         "Technical confirmation unavailable: " + snapshot.get("reason", "data unavailable")
     )
+    news_lines = "\n".join(
+        f'• {item.get("title", "Headline")}: {item.get("description", "")[:180]}'
+        for item in event.get("research_news", [])[:3]
+    )
     text = (
         f'🚨 ECONOMIC EVENT — {checkpoint.upper()} CHECKPOINT\n\n'
         f'{event["title"]}\nEvent time: {scheduled:%d %b %Y, %H:%M} WAT\n'
@@ -280,6 +284,7 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f'Fundamental direction: {analysis["direction"]} | Confidence: {analysis["confidence"]}/100\n'
         f'Technical: {technical_text}\n\nAffected market bias:\n{market_lines}\n\n'
         + "\n".join("• " + reason for reason in analysis["reasons"])
+        + ("\n\nLATEST ECONOMIC NEWS:\n" + news_lines if news_lines else "")
     )
     if checkpoint == "5m":
         if record.get("verification") == "CONFIRMED_UNCHANGED":
@@ -357,6 +362,16 @@ async def economic_events_loop(application):
                                     ee.save_event(event)
                             except Exception:
                                 log.exception("BLS model baseline could not be prepared")
+                    if checkpoint in {"24h", "1h"} and te.configured():
+                        try:
+                            news = await te.fetch_event_news(event, limit=3)
+                            if news:
+                                event["research_news"] = news
+                                event["research_news_checked_at"] = datetime.now(timezone.utc).isoformat()
+                                ee.save_event(event)
+                        except Exception:
+                            log.exception("Economic news research unavailable for %s", event.get("title"))
+                    event = ee.get_event(event["id"]) or event
                     snapshot = await research.technical_snapshot(event, checkpoint)
                     frame = snapshot.pop("_frame", None)
                     market_chart = None
