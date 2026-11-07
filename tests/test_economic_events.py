@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import economic_events as ee
+import trading_economics as te
 
 
 class EconomicEventTests(unittest.TestCase):
@@ -114,6 +115,20 @@ class EconomicEventTests(unittest.TestCase):
             5,
         )
         self.assertEqual(report["forecast_score"], "DIRECTIONAL_ALIGNMENT_ONLY")
+
+    def test_provider_values_support_units(self):
+        self.assertEqual(ee._to_number("175K"), 175000)
+        self.assertEqual(ee._to_number("4.2%"), 4.2)
+        self.assertEqual(ee._to_number("$1.2B"), 1_200_000_000)
+
+    def test_provider_consensus_is_preferred_to_provider_model_estimate(self):
+        self.assertEqual(te._consensus({"Forecast": "3.1%", "TEForecast": "3.2%"}), ("3.1%", "market_consensus"))
+        self.assertEqual(te._consensus({"Forecast": "", "TEForecast": "3.2%"}), ("3.2%", "provider_model_estimate"))
+
+    def test_provider_event_semantics_are_event_specific(self):
+        self.assertFalse(te._higher_is_better("US CPI YoY"))
+        self.assertFalse(te._higher_is_better("Unemployment Rate"))
+        self.assertTrue(te._higher_is_better("Non Farm Payrolls"))
 
     def test_usd_pair_biases_are_inverted_correctly(self):
         item = self.event(forecast="3.4", previous="3.2")
