@@ -258,6 +258,45 @@ async def handle_event_text(update, context):
     return True
 
 
+async def _refresh_provider_event(event):
+    """Refresh consensus, previous/revision and any newly published actual."""
+    if not te.configured() or not event.get("provider_calendar_id"):
+        return event
+    snapshot = await te.fetch_event_snapshot(event)
+    if not snapshot:
+        return event
+    if snapshot.get("forecast") is not None:
+        event["forecast"] = snapshot["forecast"]
+        event["forecast_type"] = snapshot.get("forecast_type", event.get("forecast_type"))
+        event["forecast_source"] = "Trading Economics"
+    if snapshot.get("previous_value") is not None:
+        event["previous"] = snapshot["previous_value"]
+    if snapshot.get("higher_is_better") is not None:
+        event["higher_is_better"] = snapshot["higher_is_better"]
+    if snapshot.get("revised_previous") is not None:
+        event["provider_revised_previous"] = snapshot["revised_previous"]
+    event["provider_source"] = snapshot.get("source")
+    event["provider_source_url"] = snapshot.get("source_url")
+    event["provider_context_checked_at"] = snapshot.get("retrieved_at")
+    if snapshot.get("value") and not event.get("post_event_report"):
+        event["actual_details"] = snapshot
+        ee.save_event(event)
+        report = ee.record_actual(
+            event["id"], snapshot["value"],
+            notes="Actual retrieved from the licensed global economic calendar.",
+            details=snapshot,
+        )
+        if snapshot.get("revised_previous") is not None:
+            saved = ee.get_event(event["id"])
+            report["revised_previous"] = snapshot["revised_previous"]
+            saved["post_event_report"] = report
+            saved.setdefault("history", []).append({"provider_revision": snapshot["revised_previous"]})
+            ee.save_event(saved)
+    else:
+        ee.save_event(event)
+    return ee.get_event(event["id"]) or event
+
+
 async def _attempt_official_actual(event):
     attempts = event.setdefault("actual_poll_attempts", [])
     elapsed = datetime.now(timezone.utc) - ee._parse_dt(event["scheduled_at"])
