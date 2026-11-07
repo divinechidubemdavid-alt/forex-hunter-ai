@@ -167,7 +167,7 @@ async def technical_snapshot(event: dict, checkpoint: str) -> dict:
             breakout = "DOWNSIDE_BREAKOUT"
         return {
             "status": "AVAILABLE", "market": market, "timeframe": timeframe,
-            "direction": direction, "ema_aligned": bool(aligned),
+            "direction": direction, "currency_direction": ({"BULLISH": "BEARISH", "BEARISH": "BULLISH"}.get(direction, direction) if market.split("/")[1] == str(event.get("currency", "USD")).upper() else direction), "ema_aligned": bool(aligned),
             "adx": round(float(last["adx"]), 2), "rsi": round(float(last["rsi"]), 2),
             "atr": round(atr, 6), "close": close, "candle_time": data.index[-1].isoformat(),
             "breakout": breakout,
