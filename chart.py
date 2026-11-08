@@ -21,6 +21,184 @@ TEXT = "#E8F0EA"
 MUTED = "#829188"
 
 
+
+
+def _confirmed_swings(data, left=2, right=2):
+    """Return confirmed local swing highs/lows (no unclosed future bars)."""
+    highs = []
+    lows = []
+    high_values = data["high"].to_numpy(dtype=float)
+    low_values = data["low"].to_numpy(dtype=float)
+
+    for i in range(left, len(data) - right):
+        high_window = high_values[i-left:i+right+1]
+        low_window = low_values[i-left:i+right+1]
+        if high_values[i] == np.max(high_window) and np.count_nonzero(high_window == high_values[i]) == 1:
+            highs.append(i)
+        if low_values[i] == np.min(low_window) and np.count_nonzero(low_window == low_values[i]) == 1:
+            lows.append(i)
+
+    return highs, lows
+
+
+def _draw_market_annotations(ax, data, x_values):
+    """Draw conservative, confirmed structure and price-action annotations."""
+    if len(data) < 12:
+        return
+
+    highs, lows = _confirmed_swings(data)
+    last_close = float(data["close"].iloc[-1])
+    last_high = float(data["high"].iloc[-1])
+    last_low = float(data["low"].iloc[-1])
+    last_atr = float((data["high"] - data["low"]).rolling(14).mean().iloc[-1])
+    if not np.isfinite(last_atr) or last_atr <= 0:
+        last_atr = max(abs(last_close) * 0.001, 1e-8)
+
+    # Label the latest confirmed swing points as HH/LH and HL/LL.
+    for points, column, is_high in ((highs, "high", True), (lows, "low", False)):
+        recent = points[-4:]
+        previous_value = None
+        for idx in recent:
+            value = float(data[column].iloc[idx])
+            if previous_value is None:
+                label = "SH" if is_high else "SL"
+            else:
+                delta = value - previous_value
+                if abs(delta) <= last_atr * 0.08:
+                    label = "EQH" if is_high else "EQL"
+                elif (delta > 0) == is_high:
+                    label = "HH" if is_high else "HL"
+                else:
+                    label = "LH" if is_high else "LL"
+            color = RED if is_high else GREEN
+            offset = last_atr * (0.18 if is_high else -0.18)
+            ax.annotate(
+                label,
+                (x_values[idx], value + offset),
+                color=color,
+                fontsize=8,
+                fontweight="bold",
+                ha="center",
+                va="bottom" if is_high else "top",
+                zorder=7,
+                bbox={"boxstyle": "round,pad=0.18", "fc": BACKGROUND, "ec": color, "alpha": 0.85, "lw": 0.6},
+            )
+            previous_value = value
+
+    # Infer structure only when both swing sequences support it.
+    structure = "RANGE / DEVELOPING"
+    if len(highs) >= 2 and len(lows) >= 2:
+        higher_high = data["high"].iloc[highs[-1]] > data["high"].iloc[highs[-2]]
+        higher_low = data["low"].iloc[lows[-1]] > data["low"].iloc[lows[-2]]
+        lower_high = data["high"].iloc[highs[-1]] < data["high"].iloc[highs[-2]]
+        lower_low = data["low"].iloc[lows[-1]] < data["low"].iloc[lows[-2]]
+        if higher_high and higher_low:
+            structure = "BULLISH STRUCTURE  HH + HL"
+        elif lower_high and lower_low:
+            structure = "BEARISH STRUCTURE  LH + LL"
+
+    structure_color = GREEN if structure.startswith("BULLISH") else RED if structure.startswith("BEARISH") else GOLD
+    ax.text(
+        0.015, 0.975, structure,
+        transform=ax.transAxes, ha="left", va="top",
+        color=structure_color, fontsize=9, fontweight="bold",
+        bbox={"boxstyle": "round,pad=0.35", "fc": BACKGROUND, "ec": structure_color, "alpha": 0.92},
+        zorder=10,
+    )
+
+    # Supply and demand zones are drawn from the wick/body of confirmed pivots.
+    # Keep only the two most recent zones of each type to avoid clutter.
+    zone_end = x_values[-1] + (x_values[-1] - x_values[-2] if len(x_values) > 1 else 0.0005) * 3
+    for idx in highs[-2:]:
+        candle = data.iloc[idx]
+        lower = max(float(candle["open"]), float(candle["close"]))
+        upper = float(candle["high"])
+        if upper > lower:
+            rect = patches.Rectangle(
+                (x_values[idx], lower), zone_end - x_values[idx], upper - lower,
+                facecolor=RED, edgecolor=RED, alpha=0.13, linewidth=0.8,
+                linestyle="--", zorder=1,
+            )
+            ax.add_patch(rect)
+            ax.text(x_values[idx], upper, "SUPPLY", color=RED, fontsize=7, va="bottom", zorder=6)
+
+    for idx in lows[-2:]:
+        candle = data.iloc[idx]
+        lower = float(candle["low"])
+        upper = min(float(candle["open"]), float(candle["close"]))
+        if upper > lower:
+            rect = patches.Rectangle(
+                (x_values[idx], lower), zone_end - x_values[idx], upper - lower,
+                facecolor=GREEN, edgecolor=GREEN, alpha=0.13, linewidth=0.8,
+                linestyle="--", zorder=1,
+            )
+            ax.add_patch(rect)
+            ax.text(x_values[idx], lower, "DEMAND", color=GREEN, fontsize=7, va="top", zorder=6)
+
+    # Mark a break of the latest confirmed swing only after a candle closes beyond it.
+    if highs:
+        resistance_idx = highs[-1]
+        resistance = float(data["high"].iloc[resistance_idx])
+        if last_close > resistance + last_atr * 0.05:
+            ax.plot(
+                [x_values[resistance_idx], zone_end], [resistance, resistance],
+                color=GREEN, linestyle=":", linewidth=1.2, zorder=5,
+            )
+            ax.annotate(
+                "BOS ↑  STRUCTURE BREAK",
+                (x_values[-1], resistance),
+                xytext=(-8, 10), textcoords="offset points",
+                color=GREEN, fontsize=7, ha="right", zorder=8,
+            )
+
+    if lows:
+        support_idx = lows[-1]
+        support = float(data["low"].iloc[support_idx])
+        if last_close < support - last_atr * 0.05:
+            ax.plot(
+                [x_values[support_idx], zone_end], [support, support],
+                color=RED, linestyle=":", linewidth=1.2, zorder=5,
+            )
+            ax.annotate(
+                "BOS ↓  STRUCTURE BREAK",
+                (x_values[-1], support),
+                xytext=(-8, -12), textcoords="offset points",
+                color=RED, fontsize=7, ha="right", zorder=8,
+            )
+
+    # Draw the most recent meaningful two-pivot trendline and label a confirmed
+    # break/retest only when the latest completed candle supports that reading.
+    trend_points = lows[-2:] if len(lows) >= 2 else highs[-2:] if len(highs) >= 2 else []
+    if len(trend_points) == 2:
+        first, second = trend_points
+        first_is_low = len(lows) >= 2
+        p1 = float(data["low" if first_is_low else "high"].iloc[first])
+        p2 = float(data["low" if first_is_low else "high"].iloc[second])
+        slope = (p2 - p1) / max(second - first, 1)
+        projected = p2 + slope * (len(data) - 1 - second)
+        line_color = GREEN if first_is_low and slope > 0 else RED if not first_is_low and slope < 0 else GOLD
+        ax.plot(
+            [x_values[first], zone_end],
+            [p1, p2 + slope * (len(data) - 1 + 3 - second)],
+            color=line_color, linestyle="-.", linewidth=1.1, alpha=0.9, zorder=4,
+        )
+        line_at_last = projected
+        previous_line = p2 + slope * (len(data) - 2 - second)
+        previous_close = float(data["close"].iloc[-2])
+        break_down = previous_close >= previous_line and last_close < line_at_last - last_atr * 0.05
+        break_up = previous_close <= previous_line and last_close > line_at_last + last_atr * 0.05
+        touches_line = last_low <= line_at_last + last_atr * 0.2 and last_high >= line_at_last - last_atr * 0.2
+        if break_down or break_up:
+            label = "TRENDLINE BREAK ↓" if break_down else "TRENDLINE BREAK ↑"
+            ax.annotate(label, (x_values[-1], last_close), xytext=(-8, -22 if break_down else 12),
+                        textcoords="offset points", color=RED if break_down else GREEN,
+                        fontsize=7, ha="right", fontweight="bold", zorder=9)
+        elif touches_line and abs(last_close - line_at_last) <= last_atr * 0.25:
+            ax.annotate("TRENDLINE RETEST", (x_values[-1], line_at_last),
+                        xytext=(-8, 12), textcoords="offset points",
+                        color=GOLD, fontsize=7, ha="right", fontweight="bold", zorder=9)
+
+
 def create_market_chart(
     candles,
     symbol,
@@ -30,7 +208,7 @@ def create_market_chart(
     take_profits=None,
 ):
     """
-    Generate a PNG candlestick chart.
+    Generate a PNG candlestick chart with market-structure overlays.
 
     Returns a BytesIO object suitable for Telegram photo messages.
     """
@@ -114,6 +292,8 @@ def create_market_chart(
         )
 
         ax.add_patch(body)
+
+    _draw_market_annotations(ax, data, x_values)
 
     levels = [
         ("ENTRY", entry, GOLD),
