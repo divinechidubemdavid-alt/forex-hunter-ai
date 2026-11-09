@@ -150,6 +150,10 @@ def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_u
                for index, value in enumerate(targets, 1)]
     if (direction == "BUY" and not stop < entry) or (direction == "SELL" and not stop > entry):
         raise ValueError("Stop loss is on the wrong side of the entry.")
+    if direction == "BUY" and not (entry < targets[0] < targets[1] < targets[2]):
+        raise ValueError("BUY take-profit levels must rise above entry in TP1–TP3 order.")
+    if direction == "SELL" and not (entry > targets[0] > targets[1] > targets[2]):
+        raise ValueError("SELL take-profit levels must fall below entry in TP1–TP3 order.")
     risk_distance = abs(entry - stop)
     if risk_distance <= 0:
         raise ValueError("Entry-to-stop distance must be greater than zero.")
