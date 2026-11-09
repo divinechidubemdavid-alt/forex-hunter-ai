@@ -14,6 +14,7 @@ from account_manager import (
     create_profile,
     calculate_account_metrics,
     calculate_position_size,
+    calculate_account_trade_plan,
     render_account_report,
     render_account_action_report,
 )
@@ -154,6 +155,14 @@ async def handle_account_callback(update, context):
             except (MarketDataError, ValueError) as exc:
                 await query.message.reply_text(f"Chart unavailable: {exc}")
     elif action == "planner":
+        active = state.get_active_account(user_id)
+        if not active:
+            await query.message.reply_photo(
+                photo=render_account_action_report("Account Required", "Register an account before building an account-aware plan"),
+                caption="Please register an account first, then select it as your active account.",
+                reply_markup=_home_keyboard(),
+            )
+            return True
         symbols = [s for s in MARKETS if is_market_allowed(s, datetime.now(ZoneInfo("Africa/Lagos")).weekday())]
         rows = [[InlineKeyboardButton(s, callback_data=f"account:plan-symbol:{s}") for s in symbols[i:i + 2]] for i in range(0, len(symbols), 2)]
         await query.message.reply_text("TRADE PLANNER\n\nChoose a market. It will analyse completed candles and show a chart. WAIT is a valid result; the planner will not invent a trade.", reply_markup=InlineKeyboardMarkup(rows))
@@ -176,16 +185,72 @@ async def handle_account_callback(update, context):
                 candles = await fetch_candles(symbol, outputsize=500, interval=timeframe, purpose="manual")
                 result = analyze(candles, timeframe)
                 result["symbol"] = symbol
+                result["timeframe"] = timeframe
                 direction = result.get("status", "WAIT")
                 entry = result.get("entry") if direction in ("BUY", "SELL") else None
                 stop = result.get("stop_loss") if entry is not None else None
                 targets = result.get("take_profits") if entry is not None else []
                 image = create_market_chart(candles, symbol, timeframe, entry=entry, stop_loss=stop, take_profits=targets)
                 summary = format_signal(symbol, result)
-                context.user_data["account_plan_result"] = {"symbol": symbol, "timeframe": timeframe, "direction": direction, "entry": entry, "stop_loss": stop, "take_profits": targets or []}
-                await query.message.reply_photo(photo=image, caption=f"TRADE PLANNER\n\n{summary}\n\nQuality score: {result.get('score', 0)}/100; not a win probability. Completed candles only. No order is placed. Verify spread, execution price and contract specifications.")
-                if entry is not None and stop is not None:
-                    await query.message.reply_text("For a lot-size estimate, use Position risk calculator with your equity, chosen risk %, absolute entry-to-stop distance and broker's verified monetary value per price unit per 1.0 lot.")
+                if entry is None or stop is None:
+                    await query.message.reply_photo(
+                        photo=image,
+                        caption=f"ACCOUNT-AWARE TRADE PLAN\n\n{summary}\n\nNo qualified setup. No lot size is calculated and no order is placed.",
+                        reply_markup=_home_keyboard(),
+                    )
+                    return True
+
+                active = state.get_active_account(user_id)
+                if not active:
+                    await query.message.reply_photo(
+                        photo=image,
+                        caption="The market setup qualified, but no active account is selected. Select an account and run the planner again.",
+                        reply_markup=_home_keyboard(),
+                    )
+                    return True
+                snapshot = active.get("snapshot") or {}
+                equity = snapshot.get("equity")
+                equity_source = "manual equity snapshot" if equity is not None else "starting balance (no snapshot)"
+                if snapshot.get("updated_at"):
+                    try:
+                        updated = datetime.fromisoformat(str(snapshot["updated_at"]).replace("Z", "+00:00"))
+                        age_hours = (datetime.now(ZoneInfo("UTC")) - updated).total_seconds() / 3600
+                        if age_hours > 24:
+                            await query.message.reply_photo(
+                                photo=image,
+                                caption=f"Setup: {symbol} {direction}\nYour saved equity snapshot is {age_hours:.1f} hours old. Update balance and equity, then run the planner again. No lot size was guessed.",
+                                reply_markup=_home_keyboard(),
+                            )
+                            return True
+                    except (TypeError, ValueError):
+                        await query.message.reply_text("Your saved equity timestamp is invalid. Update balance and equity before sizing.")
+                        return True
+                settings = state.get_user_settings(user_id)
+                risk_pct = float(settings.get("risk_percent", 1.0) or 1.0)
+                if risk_pct > 5.0:
+                    risk_pct = 5.0
+                    risk_note = "Your saved risk preference is above the planner's 5% safety ceiling; this plan is capped at 5%."
+                else:
+                    risk_note = f"Risk preference: {risk_pct:g}%."
+                context.user_data["account_plan_pending"] = {
+                    "trade": {"symbol": symbol, "timeframe": timeframe, **result},
+                    "account_id": active["id"],
+                    "risk_percent": risk_pct,
+                    "equity": float(equity if equity is not None else active["starting_balance"]),
+                    "equity_source": equity_source,
+                    "risk_note": risk_note,
+                }
+                await query.message.reply_photo(
+                    photo=image,
+                    caption=(
+                        f"ACCOUNT-AWARE TRADE PLAN\n\n{summary}\n\n"
+                        f"Active account: {active['name']}\n"
+                        f"Sizing equity: {float(equity if equity is not None else active['starting_balance']):,.2f} {active['currency']} ({equity_source})\n"
+                        f"{risk_note}\n\n"
+                        "FINAL INPUT REQUIRED: Send the broker-verified monetary value of a 1.0-lot position for a 1.0 price-unit move, in this account currency.\n"
+                        "Send only the value verified for this exact symbol and account currency. Do not use a generic example or assume a value. No order will be placed."
+                    ),
+                )
             except (MarketDataError, ValueError, KeyError) as exc:
                 await query.message.reply_text(f"Trade plan unavailable: {exc}")
     elif action == "risk":
@@ -323,6 +388,56 @@ async def handle_account_text(update, context):
             )
         except (ValueError, TypeError) as exc:
             await update.message.reply_text(f"{exc}\nPlease try again.")
+        return True
+
+    if context.user_data.get("account_plan_pending"):
+        if text.lower() == "cancel":
+            context.user_data.pop("account_plan_pending", None)
+            await update.message.reply_text("Account-aware trade plan cancelled.", reply_markup=_home_keyboard())
+            return True
+        try:
+            unit_value = float(text.replace(",", "").strip())
+            pending = context.user_data["account_plan_pending"]
+            profile = state.get_account_profile(user_id, pending["account_id"])
+            if not profile or not profile.get("active"):
+                raise ValueError("Your active account changed or is unavailable. Start the planner again.")
+            trade = pending["trade"]
+            # Use the active snapshot captured when this plan was generated.
+            profile_for_plan = dict(profile)
+            profile_for_plan["snapshot"] = dict(profile.get("snapshot") or {})
+            if pending["equity_source"].startswith("starting balance"):
+                profile_for_plan["snapshot"].pop("equity", None)
+            else:
+                profile_for_plan["snapshot"]["equity"] = pending["equity"]
+            plan = calculate_account_trade_plan(
+                profile_for_plan, trade, pending["risk_percent"], unit_value
+            )
+            context.user_data.pop("account_plan_pending", None)
+            report = render_account_action_report(
+                "Account-Aware Position Plan",
+                f"{plan['account_name']} • theoretical sizing only",
+                {"Risk amount": plan["risk_amount"], "Lot estimate": plan["lots"]},
+            )
+            await update.message.reply_photo(
+                photo=report,
+                caption=(
+                    "🛡 ACCOUNT-AWARE TRADE PLAN\n\n"
+                    f"Account: {plan['account_name']}\n"
+                    f"Market: {plan['symbol']} | {plan['timeframe']}\n"
+                    f"Direction: {plan['direction']}\n"
+                    f"Equity basis: {plan['equity']:,.2f} {plan['currency']} ({plan['equity_source']})\n"
+                    f"Risk: {plan['risk_percent']:g}% = {plan['risk_amount']:,.2f} {plan['currency']}\n"
+                    f"Entry: {plan['entry']}\nStop Loss: {plan['stop_loss']}\n"
+                    f"TP1: {plan['take_profits'][0]}\nTP2: {plan['take_profits'][1]}\nTP3: {plan['take_profits'][2]}\n"
+                    f"Stop distance: {plan['risk_distance']}\n"
+                    f"Verified unit value entered: {unit_value:g} {plan['currency']} per price unit per 1.0 lot\n"
+                    f"THEORETICAL volume: {plan['lots']:.4f} lots\n\n"
+                    "Before trading, verify tick size/value, contract size, account-currency conversion, lot step, minimum/maximum volume and commission. Round volume DOWN to your broker's permitted lot step. This is not a broker fill or order instruction."
+                ),
+                reply_markup=_home_keyboard(),
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            await update.message.reply_text(f"{exc}\nPlease enter the verified unit value as a positive number, or send cancel.")
         return True
 
     if context.user_data.get("account_risk_pending"):
