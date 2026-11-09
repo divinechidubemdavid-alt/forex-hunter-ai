@@ -90,7 +90,11 @@ async def handle_account_callback(update, context):
     elif action.startswith("select:"):
         account_id = action.split(":", 1)[1]
         if state.set_active_account(user_id, account_id):
-            await query.message.reply_text("Active account changed.", reply_markup=_home_keyboard())
+            await query.message.reply_photo(
+                photo=render_account_action_report("Active Account Selected", "All account tools now use this profile"),
+                caption="Active account changed.",
+                reply_markup=_home_keyboard()
+            )
         else:
             await query.message.reply_text("That account could not be found.")
     elif action == "update":
@@ -268,11 +272,18 @@ async def handle_account_text(update, context):
             })
             state.add_account_profile(user_id, profile)
             context.user_data.pop("account_wizard", None)
-            await update.message.reply_text(
-                f"✅ Account registered: {profile['name']}\n"
-                f"Type: {profile['account_type']}\n"
-                f"Starting balance: {profile['starting_balance']} {profile['currency']}\n"
-                "Rules are marked UNVERIFIED. Check your firm's official dashboard/rulebook before relying on them.",
+            await update.message.reply_photo(
+                photo=render_account_action_report(
+                    "Account Registered",
+                    "Rules remain unverified until checked against the firm's current rulebook",
+                    {"Starting balance": profile["starting_balance"]}
+                ),
+                caption=(
+                    f"✅ Account registered: {profile['name']}\n"
+                    f"Type: {profile['account_type']}\n"
+                    f"Starting balance: {profile['starting_balance']} {profile['currency']}\n"
+                    "Rules are marked UNVERIFIED. Check your firm's official dashboard/rulebook before relying on them."
+                ),
                 reply_markup=_home_keyboard(),
             )
             return True
@@ -295,12 +306,19 @@ async def handle_account_text(update, context):
             metrics = calculate_account_metrics(profile, balance, equity)
             saved = state.update_account_snapshot(user_id, account_id, metrics)
             context.user_data.pop("account_snapshot_id", None)
-            await update.message.reply_text(
-                f"✅ Manual account snapshot saved for {saved['name']}\n"
-                f"Balance: {balance:.2f} {profile['currency']}\n"
-                f"Equity: {equity:.2f} {profile['currency']}\n"
-                f"Floating P/L: {metrics['floating_pnl']:+.2f} {profile['currency']}\n"
-                "This is a manually entered snapshot, not a live MT5 connection.",
+            await update.message.reply_photo(
+                photo=render_account_action_report(
+                    "Balance & Equity Snapshot",
+                    "Manually entered figures • not a live MT5 feed",
+                    {"Balance": balance, "Equity": equity, "Floating P/L": metrics["floating_pnl"]}
+                ),
+                caption=(
+                    f"✅ Manual account snapshot saved for {saved['name']}\n"
+                    f"Balance: {balance:.2f} {profile['currency']}\n"
+                    f"Equity: {equity:.2f} {profile['currency']}\n"
+                    f"Floating P/L: {metrics['floating_pnl']:+.2f} {profile['currency']}\n"
+                    "This is a manually entered snapshot, not a live MT5 connection."
+                ),
                 reply_markup=_home_keyboard(),
             )
         except (ValueError, TypeError) as exc:
@@ -315,14 +333,21 @@ async def handle_account_text(update, context):
             equity, risk_pct, stop_distance, unit_value = map(float, parts)
             result = calculate_position_size(equity, risk_pct, stop_distance, unit_value)
             context.user_data.pop("account_risk_pending", None)
-            await update.message.reply_text(
-                "🧮 POSITION RISK ESTIMATE\n\n"
-                f"Equity: {equity:.2f}\n"
-                f"Risk: {risk_pct:g}% ({result['risk_amount']:.2f})\n"
-                f"Stop distance: {stop_distance:g}\n"
-                f"Value per price unit per lot: {unit_value:g}\n"
-                f"Calculated volume: {result['lots']:.4f} lots\n\n"
-                "Before using this estimate, verify tick value, contract size, lot step, minimum/maximum volume, commission and account currency with your broker. This is not an order instruction.",
+            await update.message.reply_photo(
+                photo=render_account_action_report(
+                    "Position Risk Estimate",
+                    "Check broker tick value, lot step, commissions and account currency",
+                    {"Risk amount": result["risk_amount"], "Calculated lots": result["lots"]}
+                ),
+                caption=(
+                    "🧮 POSITION RISK ESTIMATE\n\n"
+                    f"Equity: {equity:.2f}\n"
+                    f"Risk: {risk_pct:g}% ({result['risk_amount']:.2f})\n"
+                    f"Stop distance: {stop_distance:g}\n"
+                    f"Value per price unit per lot: {unit_value:g}\n"
+                    f"Calculated volume: {result['lots']:.4f} lots\n\n"
+                    "Before using this estimate, verify tick value, contract size, lot step, minimum/maximum volume, commission and account currency with your broker. This is not an order instruction."
+                ),
                 reply_markup=_home_keyboard(),
             )
         except (ValueError, TypeError) as exc:
