@@ -28,6 +28,7 @@ from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
 from economic_events_bot import show_event_center, handle_event_callback, handle_event_text, register_event_handlers
+from account_manager_bot import MENU_LABEL as ACCOUNT_MANAGER_LABEL, show_account_manager, handle_account_callback, handle_account_text
 from report_charts import (
     create_performance_report,
     create_tracked_report,
@@ -44,6 +45,7 @@ MENU = ReplyKeyboardMarkup(
         ["📌 My Tracked Signals", "📊 Performance"],
         ["📚 Signal History", "⚙️ Settings"],
         ["🗓 Economic Events"],
+        ["🛡 Account Manager"],
         ["ℹ️ Help"],
     ],
     resize_keyboard=True,
@@ -936,6 +938,8 @@ async def handle_event_callback_if_needed(update, context):
 
 
 async def handle_callback(update, context):
+    if await handle_account_callback(update, context):
+        return
     if await handle_event_callback_if_needed(update, context):
         return
     query = update.callback_query
@@ -1346,6 +1350,8 @@ def text_for_event_center(update):
 
 
 async def handle_text(update, context):
+    if await handle_account_text(update, context):
+        return
     if text_for_event_center(update):
         await show_event_center(update, context)
         return
@@ -1430,7 +1436,10 @@ async def handle_text(update, context):
         )
         return
 
-    if text == "🔎 Market Scanner":
+    if text == ACCOUNT_MANAGER_LABEL:
+        await show_account_manager(update, context)
+
+    elif text == "🔎 Market Scanner":
         await show_market_scanner(update, context)
 
     elif text == "🔥 Strong Signals":

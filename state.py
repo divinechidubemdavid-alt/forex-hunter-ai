@@ -43,6 +43,7 @@ def _empty_state():
         "api_budget": {},
         "opportunities": {},
         "next_opportunity_id": 1,
+        "account_profiles": {},
     }
 
 
@@ -760,3 +761,63 @@ def close_trade(trade_id, user_id=None):
 
         _save()
         return True
+
+
+# ---------------------------------------------------------
+# UNIVERSAL ACCOUNT MANAGER
+# ---------------------------------------------------------
+
+def add_account_profile(user_id, profile):
+    """Save an account profile owned by one Telegram user."""
+    with _lock:
+        record = dict(profile)
+        record["user_id"] = str(user_id)
+        record.setdefault("snapshots", [])
+        _state["account_profiles"].setdefault(str(user_id), {})[str(record["id"])] = record
+        _save()
+        return dict(record)
+
+
+def get_account_profiles(user_id):
+    with _lock:
+        records = _state["account_profiles"].get(str(user_id), {})
+        return [dict(item) for item in records.values()]
+
+
+def get_account_profile(user_id, account_id):
+    with _lock:
+        record = _state["account_profiles"].get(str(user_id), {}).get(str(account_id))
+        return dict(record) if record else None
+
+
+def update_account_snapshot(user_id, account_id, snapshot):
+    with _lock:
+        record = _state["account_profiles"].get(str(user_id), {}).get(str(account_id))
+        if not record:
+            return None
+        saved = dict(snapshot)
+        record["snapshot"] = saved
+        record.setdefault("snapshots", []).append(saved)
+        record["snapshots"] = record["snapshots"][-100:]
+        _save()
+        return dict(record)
+
+
+def set_active_account(user_id, account_id):
+    with _lock:
+        records = _state["account_profiles"].get(str(user_id), {})
+        if str(account_id) not in records:
+            return False
+        for key, record in records.items():
+            record["active"] = key == str(account_id)
+        _save()
+        return True
+
+
+def get_active_account(user_id):
+    with _lock:
+        records = _state["account_profiles"].get(str(user_id), {})
+        for record in records.values():
+            if record.get("active"):
+                return dict(record)
+        return None
