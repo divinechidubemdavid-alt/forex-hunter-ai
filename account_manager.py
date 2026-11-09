@@ -80,20 +80,41 @@ def calculate_account_metrics(profile, balance, equity):
     equity = _number(equity, "Equity")
     start = float(profile["starting_balance"])
     rules = profile.get("rules") or {}
-    current_loss = max(0.0, start - equity)
     overall_pct = rules.get("overall_loss_percent")
     daily_pct = rules.get("daily_loss_percent")
     overall_limit = start * float(overall_pct) / 100 if overall_pct is not None else None
     daily_limit = start * float(daily_pct) / 100 if daily_pct is not None else None
+    model = rules.get("drawdown_model", "STATIC")
+
+    # A static limit can be measured from the initial balance. A trailing
+    # limit needs the firm's exact high-water-mark/reset rules and a recorded
+    # equity history; never approximate it from starting balance alone.
+    if model == "STATIC":
+        overall_loss_used = max(0.0, start - equity)
+        overall_loss_remaining = (
+            max(0.0, overall_limit - overall_loss_used)
+            if overall_limit is not None else None
+        )
+        overall_loss_floor = (
+            start - overall_limit if overall_limit is not None else None
+        )
+    else:
+        overall_loss_used = None
+        overall_loss_remaining = None
+        overall_loss_floor = None
+
     return {
         "balance": balance,
         "equity": equity,
         "floating_pnl": equity - balance,
-        "overall_loss_used": current_loss,
+        "drawdown_model": model,
+        "overall_loss_used": overall_loss_used,
         "overall_loss_limit": overall_limit,
-        "overall_loss_remaining": max(0.0, overall_limit - current_loss) if overall_limit is not None else None,
-        "overall_loss_floor": start - overall_limit if overall_limit is not None and rules.get("drawdown_model") == "STATIC" else None,
+        "overall_loss_remaining": overall_loss_remaining,
+        "overall_loss_floor": overall_loss_floor,
+        "overall_loss_tracking_available": model == "STATIC",
         "daily_loss_limit": daily_limit,
+        "daily_loss_tracking_available": False,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
