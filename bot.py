@@ -28,7 +28,7 @@ from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
 from economic_events_bot import show_event_center, handle_event_callback, handle_event_text, register_event_handlers
-from report_charts import (
+from account_manager_bot import MENU_LABEL as ACCOUNT_MANAGER_LABEL, show_account_manager, handle_account_callback, handle_account_text\nfrom report_charts import (
     create_performance_report,
     create_tracked_report,
     create_history_report,
@@ -1430,7 +1430,7 @@ async def handle_text(update, context):
         )
         return
 
-    if text == "🔎 Market Scanner":
+    if text == ACCOUNT_MANAGER_LABEL:\n        await show_account_manager(update, context)\n\n    elif text == "🔎 Market Scanner":
         await show_market_scanner(update, context)
 
     elif text == "🔥 Strong Signals":
