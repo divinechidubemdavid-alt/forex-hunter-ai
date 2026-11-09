@@ -195,7 +195,7 @@ async def handle_account_callback(update, context):
                 if entry is None or stop is None:
                     await query.message.reply_photo(
                         photo=image,
-                        caption=f"ACCOUNT-AWARE TRADE PLAN\\n\\n{summary}\\n\\nNo qualified setup. No lot size is calculated and no order is placed.",
+                        caption=f"ACCOUNT-AWARE TRADE PLAN\n\n{summary}\n\nNo qualified setup. No lot size is calculated and no order is placed.",
                         reply_markup=_home_keyboard(),
                     )
                     return True
@@ -218,7 +218,7 @@ async def handle_account_callback(update, context):
                         if age_hours > 24:
                             await query.message.reply_photo(
                                 photo=image,
-                                caption=f"Setup: {symbol} {direction}\\nYour saved equity snapshot is {age_hours:.1f} hours old. Update balance and equity, then run the planner again. No lot size was guessed.",
+                                caption=f"Setup: {symbol} {direction}\nYour saved equity snapshot is {age_hours:.1f} hours old. Update balance and equity, then run the planner again. No lot size was guessed.",
                                 reply_markup=_home_keyboard(),
                             )
                             return True
@@ -243,11 +243,11 @@ async def handle_account_callback(update, context):
                 await query.message.reply_photo(
                     photo=image,
                     caption=(
-                        f"ACCOUNT-AWARE TRADE PLAN\\n\\n{summary}\\n\\n"
-                        f"Active account: {active['name']}\\n"
-                        f"Sizing equity: {float(equity if equity is not None else active['starting_balance']):,.2f} {active['currency']} ({equity_source})\\n"
-                        f"{risk_note}\\n\\n"
-                        "FINAL INPUT REQUIRED: Send the broker-verified monetary value of a 1.0-lot position for a 1.0 price-unit move, in this account currency.\\n"
+                        f"ACCOUNT-AWARE TRADE PLAN\n\n{summary}\n\n"
+                        f"Active account: {active['name']}\n"
+                        f"Sizing equity: {float(equity if equity is not None else active['starting_balance']):,.2f} {active['currency']} ({equity_source})\n"
+                        f"{risk_note}\n\n"
+                        "FINAL INPUT REQUIRED: Send the broker-verified monetary value of a 1.0-lot position for a 1.0 price-unit move, in this account currency.\n"
                         "Send only the value verified for this exact symbol and account currency. Do not use a generic example or assume a value. No order will be placed."
                     ),
                 )
@@ -421,23 +421,23 @@ async def handle_account_text(update, context):
             await update.message.reply_photo(
                 photo=report,
                 caption=(
-                    "🛡 ACCOUNT-AWARE TRADE PLAN\\n\\n"
-                    f"Account: {plan['account_name']}\\n"
-                    f"Market: {plan['symbol']} | {plan['timeframe']}\\n"
-                    f"Direction: {plan['direction']}\\n"
-                    f"Equity basis: {plan['equity']:,.2f} {plan['currency']} ({plan['equity_source']})\\n"
-                    f"Risk: {plan['risk_percent']:g}% = {plan['risk_amount']:,.2f} {plan['currency']}\\n"
-                    f"Entry: {plan['entry']}\\nStop Loss: {plan['stop_loss']}\\n"
-                    f"TP1: {plan['take_profits'][0]}\\nTP2: {plan['take_profits'][1]}\\nTP3: {plan['take_profits'][2]}\\n"
-                    f"Stop distance: {plan['risk_distance']}\\n"
-                    f"Verified unit value entered: {unit_value:g} {plan['currency']} per price unit per 1.0 lot\\n"
-                    f"THEORETICAL volume: {plan['lots']:.4f} lots\\n\\n"
+                    "🛡 ACCOUNT-AWARE TRADE PLAN\n\n"
+                    f"Account: {plan['account_name']}\n"
+                    f"Market: {plan['symbol']} | {plan['timeframe']}\n"
+                    f"Direction: {plan['direction']}\n"
+                    f"Equity basis: {plan['equity']:,.2f} {plan['currency']} ({plan['equity_source']})\n"
+                    f"Risk: {plan['risk_percent']:g}% = {plan['risk_amount']:,.2f} {plan['currency']}\n"
+                    f"Entry: {plan['entry']}\nStop Loss: {plan['stop_loss']}\n"
+                    f"TP1: {plan['take_profits'][0]}\nTP2: {plan['take_profits'][1]}\nTP3: {plan['take_profits'][2]}\n"
+                    f"Stop distance: {plan['risk_distance']}\n"
+                    f"Verified unit value entered: {unit_value:g} {plan['currency']} per price unit per 1.0 lot\n"
+                    f"THEORETICAL volume: {plan['lots']:.4f} lots\n\n"
                     "Before trading, verify tick size/value, contract size, account-currency conversion, lot step, minimum/maximum volume and commission. Round volume DOWN to your broker's permitted lot step. This is not a broker fill or order instruction."
                 ),
                 reply_markup=_home_keyboard(),
             )
         except (ValueError, TypeError, KeyError) as exc:
-            await update.message.reply_text(f"{exc}\\nPlease enter the verified unit value as a positive number, or send cancel.")
+            await update.message.reply_text(f"{exc}\nPlease enter the verified unit value as a positive number, or send cancel.")
         return True
 
     if context.user_data.get("account_risk_pending"):
