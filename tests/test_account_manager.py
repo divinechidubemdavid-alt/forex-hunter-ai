@@ -33,6 +33,24 @@ class AccountManagerTests(unittest.TestCase):
         self.assertEqual(metrics["overall_loss_remaining"], 250)
         self.assertEqual(metrics["overall_loss_floor"], 4600)
 
+    def test_trailing_drawdown_is_not_falsely_calculated_from_starting_balance(self):
+        profile = create_profile("123", {
+            "name": "Trailing Account",
+            "account_type": "PROP_CHALLENGE",
+            "starting_balance": 5000,
+            "currency": "USD",
+            "rules": {
+                "overall_loss_percent": 8,
+                "drawdown_model": "TRAILING",
+            },
+        })
+        metrics = calculate_account_metrics(profile, 5100, 4950)
+        self.assertIsNone(metrics["overall_loss_used"])
+        self.assertIsNone(metrics["overall_loss_remaining"])
+        self.assertIsNone(metrics["overall_loss_floor"])
+        self.assertFalse(metrics["overall_loss_tracking_available"])
+        self.assertFalse(metrics["daily_loss_tracking_available"])
+
     def test_position_size_uses_risk_and_stop_distance(self):
         result = calculate_position_size(5000, 0.25, 2.5, 10)
         self.assertAlmostEqual(result["risk_amount"], 12.5)
