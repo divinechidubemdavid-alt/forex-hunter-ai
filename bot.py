@@ -1438,7 +1438,10 @@ async def handle_text(update, context):
         )
         return
 
-    if text == ACCOUNT_MANAGER_LABEL:\n        await show_account_manager(update, context)\n\n    elif text == "🔎 Market Scanner":
+    if text == ACCOUNT_MANAGER_LABEL:
+        await show_account_manager(update, context)
+
+    elif text == "🔎 Market Scanner":
         await show_market_scanner(update, context)
 
     elif text == "🔥 Strong Signals":
