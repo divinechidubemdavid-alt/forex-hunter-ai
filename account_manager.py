@@ -132,6 +132,54 @@ def calculate_position_size(account_equity, risk_percent, stop_distance, value_p
     return {"risk_amount": risk_amount, "risk_percent": risk_pct, "stop_distance": distance, "lots": lots}
 
 
+def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_unit_per_lot):
+    """Combine a qualified strategy setup with account-based position sizing.
+
+    The supplied unit value must be verified from the user's broker contract
+    specifications. This function never infers pip/tick value.
+    """
+    direction = str(trade.get("status", "")).upper()
+    if direction not in {"BUY", "SELL"}:
+        raise ValueError("A qualified BUY or SELL setup is required.")
+    entry = _number(trade.get("entry"), "Entry", 0.00000001)
+    stop = _number(trade.get("stop_loss"), "Stop loss", 0.00000001)
+    targets = trade.get("take_profits") or []
+    if len(targets) != 3:
+        raise ValueError("The strategy must provide all three take-profit levels.")
+    targets = [_number(value, f"TP{index}", 0.00000001)
+               for index, value in enumerate(targets, 1)]
+    if (direction == "BUY" and not stop < entry) or (direction == "SELL" and not stop > entry):
+        raise ValueError("Stop loss is on the wrong side of the entry.")
+    risk_distance = abs(entry - stop)
+    if risk_distance <= 0:
+        raise ValueError("Entry-to-stop distance must be greater than zero.")
+
+    snapshot = profile.get("snapshot") or {}
+    equity = snapshot.get("equity")
+    if equity is None:
+        equity = profile.get("starting_balance")
+        equity_source = "starting balance (no manual equity snapshot)"
+    else:
+        equity_source = "latest manually saved equity snapshot"
+    sizing = calculate_position_size(
+        equity, risk_percent, risk_distance, value_per_price_unit_per_lot
+    )
+    return {
+        "symbol": trade.get("symbol"),
+        "timeframe": trade.get("timeframe"),
+        "direction": direction,
+        "entry": entry,
+        "stop_loss": stop,
+        "take_profits": targets,
+        "risk_distance": risk_distance,
+        "equity": float(equity),
+        "equity_source": equity_source,
+        "currency": profile.get("currency", "USD"),
+        "account_name": profile.get("name", "Active account"),
+        **sizing,
+    }
+
+
 def save_profile(user_id, profile):
     return state_add_account_profile(user_id, profile)
 
