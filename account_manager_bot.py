@@ -248,7 +248,7 @@ async def handle_account_callback(update, context):
                         f"Sizing equity: {float(equity if equity is not None else active['starting_balance']):,.2f} {active['currency']} ({equity_source})\\n"
                         f"{risk_note}\\n\\n"
                         "FINAL INPUT REQUIRED: Send the broker-verified monetary value of a 1.0-lot position for a 1.0 price-unit move, in this account currency.\\n"
-                        "Example only: 10. Do not use an assumed value. Check your broker's symbol specification/tick value first. No order will be placed."
+                        "Send only the value verified for this exact symbol and account currency. Do not use a generic example or assume a value. No order will be placed."
                     ),
                 )
             except (MarketDataError, ValueError, KeyError) as exc:
