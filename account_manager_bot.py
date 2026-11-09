@@ -119,6 +119,7 @@ async def handle_account_text(update, context):
         step = wizard["step"]
         prompts = {
             "name": ("name", "2/9 — Which account type? Send PROP_CHALLENGE, FUNDED_PROP, or PERSONAL."),
+            "drawdown_model": ("drawdown_model", "Send STATIC or TRAILING."),
             "account_type": ("account_type", "3/9 — Enter the prop-firm name, or send - for a personal account."),
             "firm_name": ("firm_name", "4/9 — Enter starting account balance, for example 5000."),
             "starting_balance": ("starting_balance", "5/9 — Enter account currency: USD, EUR, GBP or NGN."),
