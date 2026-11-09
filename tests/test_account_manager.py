@@ -68,7 +68,7 @@ class AccountManagerTests(unittest.TestCase):
             "stop_loss": 1.0950,
             "take_profits": [1.1050, 1.1100, 1.1150],
         }
-        result = calculate_account_trade_plan(profile, trade, 0.5, 10)
+        result = calculate_account_trade_plan(profile, trade, 0.5, 10000)
         self.assertEqual(result["equity"], 4925)
         self.assertEqual(result["equity_source"], "latest manually saved equity snapshot")
         self.assertAlmostEqual(result["risk_amount"], 24.625)
