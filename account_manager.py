@@ -169,3 +169,45 @@ def render_account_report(profile):
     output.seek(0)
     output.name = "account_dashboard.png"
     return output
+
+
+
+def render_account_action_report(title, subtitle="", metrics=None):
+    """Render a compact branded visual for Account Manager actions."""
+    from io import BytesIO
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    metrics = metrics or {}
+    labels = list(metrics.keys())[:4]
+    values = [float(metrics[key]) for key in labels]
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig.patch.set_facecolor("#080B0A")
+    ax.set_facecolor("#101613")
+    if labels:
+        bars = ax.bar(labels, values, color=["#39FF88", "#D6AD45", "#FF5263", "#829188"][:len(labels)])
+        ax.tick_params(axis="x", colors="#E8F0EA", labelrotation=12)
+        ax.tick_params(axis="y", colors="#E8F0EA")
+        for bar, value in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(), f"{value:,.2f}",
+                    ha="center", va="bottom", color="#E8F0EA", fontsize=9)
+        ax.grid(axis="y", color="#26332B", linestyle=":", alpha=.7)
+    else:
+        ax.set_axis_off()
+        ax.text(.5, .55, "FOREX HUNTER AI", transform=ax.transAxes,
+                ha="center", va="center", color="#39FF88", fontsize=20, weight="bold")
+        ax.text(.5, .38, "ACCOUNT MANAGEMENT", transform=ax.transAxes,
+                ha="center", va="center", color="#E8F0EA", fontsize=11)
+    ax.set_title(str(title).upper(), color="#E8F0EA", weight="bold", pad=18)
+    if subtitle:
+        fig.text(.5, .04, str(subtitle)[:110], ha="center", color="#D6AD45", fontsize=9)
+    for spine in ax.spines.values():
+        spine.set_color("#344238")
+    fig.tight_layout(rect=(0, .08, 1, 1))
+    output = BytesIO()
+    fig.savefig(output, format="png", dpi=140, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    output.seek(0)
+    output.name = "account_action_report.png"
+    return output
