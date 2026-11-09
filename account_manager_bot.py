@@ -15,6 +15,7 @@ from account_manager import (
     calculate_account_metrics,
     calculate_position_size,
     render_account_report,
+    render_account_action_report,
 )
 
 MENU_LABEL = "🛡 Account Manager"
@@ -45,11 +46,14 @@ async def show_account_manager(update, context):
             f"Equity: {snapshot.get('equity', 'Not entered')}\n"
             f"Rules verified: {'Yes' if active.get('rules', {}).get('verified') else 'No — review required'}"
         )
-    await update.effective_message.reply_text(
-        "🛡 UNIVERSAL ACCOUNT MANAGER\n\n"
-        "Manage prop-firm challenges, funded accounts and personal trading accounts.\n\n"
-        + summary
-        + "\n\nManual snapshots, live market charts and a completed-candle trade planner are available. Automatic MT5 monitoring is a later stage.",
+    await update.effective_message.reply_photo(
+        photo=render_account_action_report("Universal Account Manager", "Analyse • Track • Protect"),
+        caption=(
+            "🛡 UNIVERSAL ACCOUNT MANAGER\n\n"
+            "Manage prop-firm challenges, funded accounts and personal trading accounts.\n\n"
+            + summary
+            + "\n\nManual snapshots, live market charts and a completed-candle trade planner are available. Automatic MT5 monitoring is a later stage."
+        ),
         reply_markup=_home_keyboard(),
     )
 
@@ -65,7 +69,10 @@ async def handle_account_callback(update, context):
 
     if action == "register":
         context.user_data["account_wizard"] = {"step": "name"}
-        await query.message.reply_text("Let's register an account.\n\n1/9 — Send an account nickname, for example: My $5K Challenge")
+        await query.message.reply_photo(
+            photo=render_account_action_report("Register Trading Account", "Set up a prop challenge, funded or personal account"),
+            caption="Let's register an account.\n\n1/9 — Send an account nickname, for example: My $5K Challenge"
+        )
     elif action == "list":
         profiles = state.get_account_profiles(user_id)
         if not profiles:
@@ -75,7 +82,11 @@ async def handle_account_callback(update, context):
                 ("✓ " if item.get("active") else "") + item["name"],
                 callback_data=f"account:select:{item['id']}",
             )] for item in profiles]
-            await query.message.reply_text("Your saved accounts. Select one to make it active:", reply_markup=InlineKeyboardMarkup(rows))
+            await query.message.reply_photo(
+                photo=render_account_action_report("Your Accounts", f"{len(profiles)} account profile(s) saved"),
+                caption="Your saved accounts. Select one to make it active:",
+                reply_markup=InlineKeyboardMarkup(rows)
+            )
     elif action.startswith("select:"):
         account_id = action.split(":", 1)[1]
         if state.set_active_account(user_id, account_id):
@@ -89,7 +100,10 @@ async def handle_account_callback(update, context):
             await query.message.reply_text("Register an account first.")
         else:
             context.user_data["account_snapshot_id"] = active["id"]
-            await query.message.reply_text("Send your latest figures as: balance | equity\nExample: 4980 | 4965\nUse the same account currency. These are manual figures, not a live MT5 feed.")
+            await query.message.reply_photo(
+                photo=render_account_action_report("Balance & Equity Update", f"{active['name']} • manual snapshot"),
+                caption="Send your latest figures as: balance | equity\nExample: 4980 | 4965\nUse the same account currency. These are manual figures, not a live MT5 feed."
+            )
     elif action == "dashboard":
         profiles = state.get_account_profiles(user_id)
         active = next((p for p in profiles if p.get("active")), None)
@@ -172,11 +186,14 @@ async def handle_account_callback(update, context):
                 await query.message.reply_text(f"Trade plan unavailable: {exc}")
     elif action == "risk":
         context.user_data["account_risk_pending"] = True
-        await query.message.reply_text(
-            "Position risk calculator\n\n"
-            "Send: equity | risk % | stop distance | value per price unit per 1.0 lot\n"
-            "Example: 5000 | 0.25 | 2.5 | 10\n\n"
-            "The last value must come from your broker's contract/tick specifications. Do not guess it. This calculator does not place trades."
+        await query.message.reply_photo(
+            photo=render_account_action_report("Position Risk Calculator", "Risk amount and lot estimate require verified broker contract data"),
+            caption=(
+                "Position risk calculator\n\n"
+                "Send: equity | risk % | stop distance | value per price unit per 1.0 lot\n"
+                "Example: 5000 | 0.25 | 2.5 | 10\n\n"
+                "The last value must come from your broker's contract/tick specifications. Do not guess it. This calculator does not place trades."
+            )
         )
     return True
 
