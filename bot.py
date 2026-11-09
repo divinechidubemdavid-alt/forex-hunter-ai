@@ -1352,8 +1352,6 @@ def text_for_event_center(update):
 async def handle_text(update, context):
     if await handle_account_text(update, context):
         return
-    if await handle_account_text(update, context):
-        return
     if text_for_event_center(update):
         await show_event_center(update, context)
         return
