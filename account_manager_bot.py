@@ -1,5 +1,13 @@
 """Telegram UI for universal manual-first account management."""
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from config import MARKETS, TIMEFRAMES
+from market_data import fetch_candles, MarketDataError
+from strategy import analyze, format_signal
+from chart import create_market_chart
+from market_scope import is_market_allowed
 
 import state
 from account_manager import (
@@ -19,6 +27,8 @@ def _home_keyboard():
         [InlineKeyboardButton("📊 Account dashboard", callback_data="account:dashboard")],
         [InlineKeyboardButton("🔄 Update balance & equity", callback_data="account:update")],
         [InlineKeyboardButton("🧮 Position risk calculator", callback_data="account:risk")],
+        [InlineKeyboardButton("📈 Live market chart", callback_data="account:chart")],
+        [InlineKeyboardButton("🎯 Trade planner", callback_data="account:planner")],
     ])
 
 
@@ -39,7 +49,7 @@ async def show_account_manager(update, context):
         "🛡 UNIVERSAL ACCOUNT MANAGER\n\n"
         "Manage prop-firm challenges, funded accounts and personal trading accounts.\n\n"
         + summary
-        + "\n\nThis version uses manual snapshots. Automatic MT5 connection is a later, separately tested stage.",
+        + "\n\nManual snapshots, live market charts and a completed-candle trade planner are available. Automatic MT5 monitoring is a later stage.",
         reply_markup=_home_keyboard(),
     )
 
@@ -99,6 +109,67 @@ async def handle_account_callback(update, context):
                     "Visual report uses the latest saved figures; it is not live broker data."
                 ),
             )
+
+    elif action == "chart":
+        symbols = [s for s in MARKETS if is_market_allowed(s, datetime.now(ZoneInfo("Africa/Lagos")).weekday())]
+        rows = [[InlineKeyboardButton(s, callback_data=f"account:chart-symbol:{s}") for s in symbols[i:i + 2]] for i in range(0, len(symbols), 2)]
+        await query.message.reply_text("Choose a market for a fresh chart:", reply_markup=InlineKeyboardMarkup(rows))
+    elif action.startswith("chart-symbol:"):
+        symbol = action.split(":", 1)[1]
+        if symbol not in MARKETS or not is_market_allowed(symbol, datetime.now(ZoneInfo("Africa/Lagos")).weekday()):
+            await query.message.reply_text("That market is not available in the current session.")
+        else:
+            context.user_data["account_chart_symbol"] = symbol
+            rows = [[InlineKeyboardButton(tf, callback_data=f"account:chart-tf:{tf}")] for tf in TIMEFRAMES]
+            await query.message.reply_text(f"Choose timeframe for {symbol}:", reply_markup=InlineKeyboardMarkup(rows))
+    elif action.startswith("chart-tf:"):
+        timeframe = action.split(":", 1)[1]
+        symbol = context.user_data.get("account_chart_symbol")
+        if timeframe not in TIMEFRAMES or symbol not in MARKETS:
+            await query.message.reply_text("Please select the market and timeframe again.")
+        else:
+            await query.message.reply_text("Fetching completed candles and preparing your chart…")
+            try:
+                candles = await fetch_candles(symbol, outputsize=500, interval=timeframe, purpose="manual")
+                image = create_market_chart(candles, symbol, timeframe)
+                await query.message.reply_photo(photo=image, caption=f"📈 {symbol} | {timeframe.upper()}\nLast completed candle: {candles.index[-1]}\nMarket structure annotations included. Verify broker prices before trading.")
+            except (MarketDataError, ValueError) as exc:
+                await query.message.reply_text(f"Chart unavailable: {exc}")
+    elif action == "planner":
+        symbols = [s for s in MARKETS if is_market_allowed(s, datetime.now(ZoneInfo("Africa/Lagos")).weekday())]
+        rows = [[InlineKeyboardButton(s, callback_data=f"account:plan-symbol:{s}") for s in symbols[i:i + 2]] for i in range(0, len(symbols), 2)]
+        await query.message.reply_text("TRADE PLANNER\n\nChoose a market. It will analyse completed candles and show a chart. WAIT is a valid result; the planner will not invent a trade.", reply_markup=InlineKeyboardMarkup(rows))
+    elif action.startswith("plan-symbol:"):
+        symbol = action.split(":", 1)[1]
+        if symbol not in MARKETS or not is_market_allowed(symbol, datetime.now(ZoneInfo("Africa/Lagos")).weekday()):
+            await query.message.reply_text("That market is not available in the current session.")
+        else:
+            context.user_data["account_plan_symbol"] = symbol
+            rows = [[InlineKeyboardButton(tf, callback_data=f"account:plan-tf:{tf}")] for tf in TIMEFRAMES]
+            await query.message.reply_text(f"Choose analysis timeframe for {symbol}:", reply_markup=InlineKeyboardMarkup(rows))
+    elif action.startswith("plan-tf:"):
+        timeframe = action.split(":", 1)[1]
+        symbol = context.user_data.get("account_plan_symbol")
+        if timeframe not in TIMEFRAMES or symbol not in MARKETS:
+            await query.message.reply_text("Please select the market and timeframe again.")
+        else:
+            await query.message.reply_text("Analysing completed candles and building your trade-plan chart…")
+            try:
+                candles = await fetch_candles(symbol, outputsize=500, interval=timeframe, purpose="manual")
+                result = analyze(candles, timeframe)
+                result["symbol"] = symbol
+                direction = result.get("status", "WAIT")
+                entry = result.get("entry") if direction in ("BUY", "SELL") else None
+                stop = result.get("stop_loss") if entry is not None else None
+                targets = result.get("take_profits") if entry is not None else []
+                image = create_market_chart(candles, symbol, timeframe, entry=entry, stop_loss=stop, take_profits=targets)
+                summary = format_signal(symbol, result)
+                context.user_data["account_plan_result"] = {"symbol": symbol, "timeframe": timeframe, "direction": direction, "entry": entry, "stop_loss": stop, "take_profits": targets or []}
+                await query.message.reply_photo(photo=image, caption=f"TRADE PLANNER\n\n{summary}\n\nQuality score: {result.get('score', 0)}/100; not a win probability. Completed candles only. No order is placed. Verify spread, execution price and contract specifications.")
+                if entry is not None and stop is not None:
+                    await query.message.reply_text("For a lot-size estimate, use Position risk calculator with your equity, chosen risk %, absolute entry-to-stop distance and broker's verified monetary value per price unit per 1.0 lot.")
+            except (MarketDataError, ValueError, KeyError) as exc:
+                await query.message.reply_text(f"Trade plan unavailable: {exc}")
     elif action == "risk":
         context.user_data["account_risk_pending"] = True
         await query.message.reply_text(
