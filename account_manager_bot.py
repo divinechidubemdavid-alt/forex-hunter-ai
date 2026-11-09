@@ -391,6 +391,10 @@ async def handle_account_text(update, context):
         return True
 
     if context.user_data.get("account_plan_pending"):
+        if text.lower() == "cancel":
+            context.user_data.pop("account_plan_pending", None)
+            await update.message.reply_text("Account-aware trade plan cancelled.", reply_markup=_home_keyboard())
+            return True
         try:
             unit_value = float(text.replace(",", "").strip())
             pending = context.user_data["account_plan_pending"]
@@ -434,9 +438,6 @@ async def handle_account_text(update, context):
             )
         except (ValueError, TypeError, KeyError) as exc:
             await update.message.reply_text(f"{exc}\\nPlease enter the verified unit value as a positive number, or send cancel.")
-            if text.lower() == "cancel":
-                context.user_data.pop("account_plan_pending", None)
-                await update.message.reply_text("Account-aware trade plan cancelled.", reply_markup=_home_keyboard())
         return True
 
     if context.user_data.get("account_risk_pending"):
