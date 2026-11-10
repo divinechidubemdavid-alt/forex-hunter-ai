@@ -725,14 +725,24 @@ async def fetch_bea_events():
 
 
 def due_checkpoints(event, now=None):
+    """Return the checkpoint whose scheduled window is currently active.
+
+    Each checkpoint remains eligible until the next checkpoint begins. This
+    allows brief scheduler/API delays to catch up without sending several stale
+    reminders together or sending pre-event alerts after the event starts.
+    """
     now = _parse_dt(now or _now())
     scheduled = _parse_dt(event["scheduled_at"])
+    checkpoints = event.get("checkpoints", {}) or {}
     due = []
-    late_windows = {"24h": 30, "1h": 10, "15m": 5, "5m": 2}
-    for label, offset in CHECKPOINTS:
+    for index, (label, offset) in enumerate(CHECKPOINTS):
         target = scheduled - offset
-        window = timedelta(minutes=late_windows.get(label, 1))
-        if target <= now < min(target + window, scheduled) and label not in event.get("checkpoints", {}):
+        next_target = (
+            scheduled - CHECKPOINTS[index + 1][1]
+            if index + 1 < len(CHECKPOINTS)
+            else scheduled
+        )
+        if target <= now < next_target and label not in checkpoints:
             due.append(label)
     return due
 
