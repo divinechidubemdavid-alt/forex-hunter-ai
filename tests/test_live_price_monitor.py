@@ -100,6 +100,28 @@ class LivePriceMilestoneTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(self.updates[-1]["tp1_hit"])
 
+    async def test_duplicate_tick_cannot_record_same_milestone_twice(self):
+        quote = {"price": 2011, "bid": 2011, "timestamp": 1794304866}
+        await signal_monitor._check_one_price(object(), "user", self.signal, quote)
+        first_event_count = len(self.events)
+        await signal_monitor._check_one_price(object(), "user", self.signal, quote)
+        self.assertEqual(len(self.events), first_event_count)
+        self.assertEqual(self.signal["tp1_hit"], True)
+
+    async def test_stream_dispatches_quote_to_matching_tracked_signal(self):
+        tracked = make_signal()
+        with (
+            patch.object(signal_monitor.state, "get_users", return_value=["user"]),
+            patch.object(signal_monitor.state, "user_monitoring_enabled", return_value=True),
+            patch.object(signal_monitor.state, "get_tracked_signals", return_value=[tracked]),
+            patch.object(signal_monitor.state, "get_signal", return_value=tracked),
+            patch.object(signal_monitor, "_check_one_price", new_callable=AsyncMock) as checker,
+        ):
+            quote = {"symbol": "XAU/USD", "price": 2011, "timestamp": 1794304867}
+            await signal_monitor._process_stream_quote(object(), quote)
+            self.assertEqual(checker.await_count, 1)
+            self.assertEqual(checker.await_args.args[1:], ("user", tracked, quote))
+
     async def test_out_of_order_quote_is_ignored(self):
         await signal_monitor._check_one_price(
             object(), "user", self.signal,
