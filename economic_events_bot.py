@@ -254,17 +254,17 @@ async def handle_event_callback(update, context):
         latest_checkpoint = checkpoints.get("5m") or checkpoints.get("15m") or {}
         history_plan = latest_checkpoint.get("trade_plan") or {}
         caption += (
-            "\\n\\nTRADE TIMEFRAME: "
+            "\n\nTRADE TIMEFRAME: "
             f'{history_plan.get("execution_timeframe", "1m")} entry / '
             f'{history_plan.get("confirmation_timeframe", "5m")} confirmation / '
             f'{history_plan.get("context_timeframe", "15m")} context'
-            f'\\nTRADE PLAN: {history_plan.get("status", "NOT YET AVAILABLE")} — '
+            f'\nTRADE PLAN: {history_plan.get("status", "NOT YET AVAILABLE")} — '
             f'{history_plan.get("reason", "Await the final review.")}'
         )
         if history_plan.get("status") == "CONDITIONAL_SETUP":
             targets = history_plan.get("take_profits", [])
             caption += (
-                f'\\n{history_plan.get("side")} {history_plan.get("market")} '
+                f'\n{history_plan.get("side")} {history_plan.get("market")} '
                 f'Entry {history_plan.get("entry_trigger")} | SL {history_plan.get("stop_loss")}'
                 f' | TP1 {targets[0]} | TP2 {targets[1]} | TP3 {targets[2]}'
             )
@@ -472,22 +472,22 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
     )
     trade_plan = record.get("trade_plan") or {}
     text += (
-        "\\n\\nTRADE TIMEFRAME & ENTRY PLAN:"
-        f"\\nDirection: {trade_plan.get('side', 'NO TRADE')} | Status: {trade_plan.get('status', 'NO_TRADE')}"
-        f"\\nExecution: {trade_plan.get('execution_timeframe', '1m')} | "
+        "\n\nTRADE TIMEFRAME & ENTRY PLAN:"
+        f"\nDirection: {trade_plan.get('side', 'NO TRADE')} | Status: {trade_plan.get('status', 'NO_TRADE')}"
+        f"\nExecution: {trade_plan.get('execution_timeframe', '1m')} | "
         f"Confirmation: {trade_plan.get('confirmation_timeframe', '5m')} | "
         f"Context: {trade_plan.get('context_timeframe', '15m')}"
-        f"\\nReason: {trade_plan.get('reason', 'Await the final 15m review.')}"
+        f"\nReason: {trade_plan.get('reason', 'Await the final 15m review.')}"
     )
     if trade_plan.get("status") == "CONDITIONAL_SETUP":
         targets = trade_plan.get("take_profits", [])
         text += (
-            f"\\nMarket: {trade_plan.get('market')} | Entry trigger: {trade_plan.get('entry_trigger')}"
-            f"\\nStop-loss: {trade_plan.get('stop_loss')} | "
+            f"\nMarket: {trade_plan.get('market')} | Entry trigger: {trade_plan.get('entry_trigger')}"
+            f"\nStop-loss: {trade_plan.get('stop_loss')} | "
             f"TP1: {targets[0]} | TP2: {targets[1]} | TP3: {targets[2]}"
-            f"\\nEntry rule: {trade_plan.get('entry_condition')}"
-            f"\\nInvalidation: {trade_plan.get('invalidation')}"
-            f"\\n{trade_plan.get('execution_note')}"
+            f"\nEntry rule: {trade_plan.get('entry_condition')}"
+            f"\nInvalidation: {trade_plan.get('invalidation')}"
+            f"\n{trade_plan.get('execution_note')}"
         )
     if checkpoint == "5m":
         if record.get("verification") == "CONFIRMED_UNCHANGED":
