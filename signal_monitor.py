@@ -376,8 +376,7 @@ async def _check_one_price(app, user_id, signal, quote):
         return
 
     flags = [bool(signal.get(f"tp{i}_hit")) for i in (1, 2, 3)]
-    previous_price = _number(signal.get("current_price"))
-
+    # Only compare two actual stream observations; a candle close from the\n    # slower fallback monitor is not a reliable previous tick.\n    previous_price = (\n        _number(signal.get("current_price")) if previous_tick is not None else None\n    )\n
     if direction == "BUY":
         stop_hit = price <= stop
         target_hits = [price >= target for target in targets]
@@ -558,15 +557,14 @@ async def live_price_stream_loop(app):
                         last_heartbeat = now
                     if now - last_refresh >= 60:
                         latest_symbols = _stream_symbols()
-                        if latest_symbols != symbols:
-                            await websocket.send(json.dumps({"action": "reset"}))
-                            symbols = latest_symbols
-                            if symbols:
-                                await websocket.send(json.dumps({
-                                    "action": "subscribe",
-                                    "params": {"symbols": ",".join(symbols)},
-                                }))
-                            logger.info("Refreshed live price subscriptions: %s.", ", ".join(symbols))
+                        new_symbols = [item for item in latest_symbols if item not in symbols]
+                        if new_symbols:
+                            await websocket.send(json.dumps({
+                                "action": "subscribe",
+                                "params": {"symbols": ",".join(new_symbols)},
+                            }))
+                            symbols = sorted(set(symbols).union(new_symbols))
+                            logger.info("Added live price subscriptions: %s.", ", ".join(new_symbols))
                         last_refresh = now
 
                     try:
