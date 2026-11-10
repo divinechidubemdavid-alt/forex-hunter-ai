@@ -112,7 +112,7 @@ def render_performance_dashboard(events: list[dict], stats: dict):
         ("EVENTS", stats.get("events", 0), BLUE),
         ("DIRECTION ACCURACY", f'{stats.get("directional_accuracy_pct")}%'
          if stats.get("directional_accuracy_pct") is not None else "N/A", GREEN),
-        ("TRADE WIN RATE", f'{stats.get("trade_win_rate_pct")}%'
+        ("SETUP WIN RATE", f'{stats.get("trade_win_rate_pct")}%'
          if stats.get("trade_win_rate_pct") is not None else "N/A", GOLD),
         ("WINS / LOSSES", f'{stats.get("trade_wins", 0)} / {stats.get("trade_losses", 0)}', RED),
         ("TP1 / TP2 / TP3", f'{stats.get("tp1", 0)} / {stats.get("tp2", 0)} / {stats.get("tp3", 0)}', GREEN),
@@ -188,6 +188,7 @@ def render_performance_dashboard(events: list[dict], stats: dict):
             color=TEXT, fontsize=9, weight="bold")
     ax.text(5, 8, "TP1, TP2 AND TP3 EACH COUNT AS A WIN. A TP WIN IS NEVER RECLASSIFIED AS A LOSS.",
             color=GREEN, fontsize=9, weight="bold")
+    ax.text(145, 8, "SIMULATED SETUP TRACKING • NOT BROKER EXECUTION", color=MUTED, fontsize=7, ha="right")
     ax.text(5, 3, "ANALYSE. IDENTIFY. TRACK. IMPROVE.", color=GOLD, fontsize=9, weight="bold")
 
     output = BytesIO()
