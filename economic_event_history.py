@@ -61,6 +61,7 @@ def update_event_trade_progress(event: dict, snapshot: dict) -> dict:
         entry_hit = high >= entry if side == "BUY" else low <= entry if side == "SELL" else False
         if entry_hit:
             trade["status"] = "MONITORING"
+            trade["result"] = "PENDING"
             trade["entered_at"] = candle_time
             trade["entry_price"] = entry
             trade["note"] = "Entry trigger reached; target/stop checks begin on the next completed candle."
