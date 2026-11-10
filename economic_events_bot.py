@@ -126,14 +126,7 @@ def _latest_market_chart(event):
 
 
 async def _event_chart_photo(event, refresh_market=False):
-    """Use a saved/live candlestick chart; label summary fallback honestly."""
-    saved = _latest_market_chart(event)
-    if saved:
-        return saved["file_id"], {
-            "chart_type": "market_candlestick",
-            "market": saved.get("market"),
-            "timeframe": saved.get("timeframe"),
-        }
+    """Use a fresh candlestick chart when requested; label summary fallback honestly."""
     if refresh_market:
         snapshot = await research.technical_snapshot(event, "15m")
         frame = snapshot.pop("_frame", None)
@@ -147,6 +140,13 @@ async def _event_chart_photo(event, refresh_market=False):
                 "market": snapshot.get("market"),
                 "timeframe": snapshot.get("timeframe", "15m"),
             }
+    saved = _latest_market_chart(event)
+    if saved:
+        return saved["file_id"], {
+            "chart_type": "market_candlestick",
+            "market": saved.get("market"),
+            "timeframe": saved.get("timeframe"),
+        }
     analysis = ee.directional_analysis(
         event, phase="post-event" if event.get("actual") is not None else "pre-event"
     )
