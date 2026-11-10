@@ -5,7 +5,7 @@ import economic_events as ee
 
 class EventTradePlanTests(unittest.TestCase):
     def setUp(self):
-        self.analysis = {"combined_direction": "BULLISH"}
+        self.analysis = {"combined_direction": "BULLISH", "fundamental_direction": "BULLISH", "confidence": 65}
 
     def snapshot(self, **overrides):
         data = {
@@ -55,6 +55,14 @@ class EventTradePlanTests(unittest.TestCase):
         plan = ee.build_event_trade_plan(self.analysis, self.snapshot(adx=18))
         self.assertEqual(plan["status"], "NO_TRADE")
 
+    def test_technical_only_bias_is_not_enough_for_event_trade(self):
+        plan = ee.build_event_trade_plan(
+            {"combined_direction": "BEARISH", "fundamental_direction": "NEUTRAL", "confidence": 25},
+            self.snapshot(),
+        )
+        self.assertEqual(plan["status"], "NO_TRADE")
+        self.assertIn("technical-only", plan["reason"])
+
     def test_unavailable_market_data_blocks_trade_plan(self):
         plan = ee.build_event_trade_plan(
             self.analysis, {"status": "UNAVAILABLE", "reason": "feed timeout"}
@@ -63,7 +71,7 @@ class EventTradePlanTests(unittest.TestCase):
 
     def test_bearish_pair_plan_places_stop_above_entry_and_targets_below(self):
         plan = ee.build_event_trade_plan(
-            {"combined_direction": "BEARISH"},
+            {"combined_direction": "BEARISH", "fundamental_direction": "BEARISH", "confidence": 65},
             self.snapshot(
                 direction="BEARISH", currency_direction="BEARISH",
                 signal_candle_high=1.105, signal_candle_low=1.100,
