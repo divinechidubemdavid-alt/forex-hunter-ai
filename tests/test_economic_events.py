@@ -37,6 +37,19 @@ class EconomicEventTests(unittest.TestCase):
         event = {"scheduled_at": (now + timedelta(minutes=2)).isoformat(), "checkpoints": {}}
         self.assertEqual(ee.due_checkpoints(event, now), [])
 
+    def test_15m_checkpoint_has_resilient_window_and_runs_before_5m(self):
+        scheduled = datetime(2026, 11, 10, 14, 30, tzinfo=timezone.utc)
+        event = {"scheduled_at": scheduled.isoformat(), "checkpoints": {}}
+        # Normal 15-minute alert time.
+        self.assertEqual(ee.due_checkpoints(event, scheduled - timedelta(minutes=15)), ["15m"])
+        # A delayed scheduler can still send the 15m review at the 5m point.
+        self.assertEqual(ee.due_checkpoints(event, scheduled - timedelta(minutes=5)), ["15m", "5m"])
+        # Once the 15m review is saved, only the 5m verification remains.
+        event["checkpoints"]["15m"] = {"analysis": {"direction": "BULLISH"}}
+        self.assertEqual(ee.due_checkpoints(event, scheduled - timedelta(minutes=5)), ["5m"])
+        # Checkpoints are never sent at/after the scheduled release time.
+        self.assertEqual(ee.due_checkpoints(event, scheduled), [])
+
     def test_create_and_list_event(self):
         item = self.event(forecast="3.1", previous="3.2")
         self.assertEqual(ee.get_event(item["id"])["title"], "US CPI")
