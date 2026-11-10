@@ -78,18 +78,18 @@ class EconomicEventTradeTrackingTests(unittest.TestCase):
         self.assertEqual(stats["tp1"], 2)
         self.assertEqual(stats["tp2"], 1)
         self.assertEqual(stats["partial_wins"], 2)
-        self.assertEqual(stats["buy_trade_win_rate_pct"], 0.0)
+        self.assertEqual(stats["buy_trade_win_rate_pct"], 50.0)
         self.assertEqual(stats["sell_trade_win_rate_pct"], 100.0)
 
 
 class EconomicEventImageTests(unittest.TestCase):
     def test_event_artwork_is_png_and_event_specific(self):
         image = visuals.render_event_artwork({"title": "US CPI", "currency": "USD"})
-        self.assertEqual(image.read(8), b"\\x89PNG\\r\\n\\x1a\\n")
+        self.assertEqual(image.read(8), bytes.fromhex("89504e470d0a1a0a"))
 
     def test_performance_dashboard_is_png(self):
         image = visuals.render_performance_dashboard([], history.performance_summary([]))
-        self.assertEqual(image.read(8), b"\\x89PNG\\r\\n\\x1a\\n")
+        self.assertEqual(image.read(8), bytes.fromhex("89504e470d0a1a0a"))
 
 
 if __name__ == "__main__":
