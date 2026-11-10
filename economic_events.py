@@ -725,20 +725,26 @@ async def fetch_bea_events():
 
 
 def due_checkpoints(event, now=None):
+    """Return the active pre-event checkpoint, with catch-up until the next one.
+
+    Each reminder remains eligible throughout its own interval. This lets a
+    delayed scheduler still send the 15m review before the 5m verification
+    window begins, without sending a stale 15m reminder at the 5m checkpoint.
+    """
     now = _parse_dt(now or _now())
     scheduled = _parse_dt(event["scheduled_at"])
+    checkpoints = event.get("checkpoints", {}) or {}
     due = []
-    # Wide catch-up windows make alerts resilient to calendar/API delays and
-    # short host restarts. The 15m window intentionally overlaps the 5m
-    # window: CHECKPOINTS ordering guarantees the 15m baseline is saved first.
-    late_windows = {"24h": 60, "1h": 30, "15m": 15, "5m": 5}
-    for label, offset in CHECKPOINTS:
+    for index, (label, offset) in enumerate(CHECKPOINTS):
         target = scheduled - offset
-        window = timedelta(minutes=late_windows.get(label, 1))
-        if target <= now < min(target + window, scheduled) and label not in event.get("checkpoints", {}):
+        next_target = (
+            scheduled - CHECKPOINTS[index + 1][1]
+            if index + 1 < len(CHECKPOINTS)
+            else scheduled
+        )
+        if target <= now < next_target and label not in checkpoints:
             due.append(label)
     return due
-
 
 def render_event_chart(event, analysis):
     """Return a small event-specific evidence card suitable for Telegram photo delivery."""
