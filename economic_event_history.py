@@ -85,12 +85,18 @@ def update_event_trade_progress(event: dict, snapshot: dict) -> dict:
         trade["status"] = "AMBIGUOUS"
         trade["result"] = "UNSCORED"
         trade["note"] = "One candle touched both stop and target; intrabar order is unknown."
-    elif stop_hit and new_hits and hits:
-        # Preserve the earlier TP win, but do not claim a later target whose
-        # order relative to the stop cannot be established from OHLC candles.
+    elif stop_hit and hits:
+        # A previous TP remains a win. The stop closes the remaining tracked
+        # position, so stop polling rather than pretending later targets remain open.
         trade["status"] = "WIN"
         trade["result"] = "WIN"
-        trade["note"] = f'TP{min(hits)} remains a win; later target touch is ambiguous.'
+        trade["exit_reason"] = "STOP_AFTER_TP"
+        trade["partial_win"] = True
+        trade["note"] = f'TP{min(hits)} remains a win; stop later closed the remaining position.'
+    elif stop_hit and new_hits:
+        trade["status"] = "AMBIGUOUS"
+        trade["result"] = "UNSCORED"
+        trade["note"] = "One candle touched both stop and target; intrabar order is unknown."
     else:
         hits.update(new_hits)
         if hits:
