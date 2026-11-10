@@ -204,7 +204,7 @@ async def handle_event_callback(update, context):
                 or ee.directional_analysis(item, phase="post-event" if item.get("actual") is not None else "pre-event")
             )
             direction = analysis.get("combined_direction", analysis.get("direction", "UNSCORED"))
-            photo, chart_meta = await _event_chart_photo(item, refresh_market=True)
+            photo, chart_meta = await _event_chart_photo(item, refresh_market=False)
             caption = (
                 f'📊 {item.get("title", "Economic event")}\n'
                 f'Market direction: {direction} | Confidence: {analysis.get("confidence", "N/A")}/100\n'
