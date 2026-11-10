@@ -271,6 +271,8 @@ async def handle_event_callback(update, context):
         saved_chart = (event.get("chart_images") or [])
         photo = saved_chart[-1].get("file_id") if saved_chart else ee.render_event_chart(event, analysis)
         sent_chart = await query.message.reply_photo(photo=photo, caption=caption[:1020])
+        if len(caption) > 1020:
+            await query.message.reply_text(caption[1020:4096])
         if sent_chart.photo:
             event.setdefault("chart_images", []).append({
                 "file_id": sent_chart.photo[-1].file_id,
@@ -509,6 +511,8 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
             if hasattr(photo, "seek"):
                 photo.seek(0)
             sent = await application.bot.send_photo(chat_id=int(user_id), photo=photo, caption=text[:1020])
+            if len(text) > 1020:
+                await application.bot.send_message(chat_id=int(user_id), text=text[1020:4096])
             if sent.photo:
                 latest = ee.get_event(event["id"]) or event
                 latest.setdefault("chart_images", []).append({
