@@ -626,7 +626,15 @@ async def economic_events_loop(application):
                         evidence_note=snapshot.get("reason", ""),
                     )
                     if checkpoint in {"15m", "5m"}:
-                        record["trade_plan"] = ee.build_event_trade_plan(record["analysis"], snapshot)
+                        if checkpoint == "5m" and record.get("verification") == "NO_15M_BASELINE":
+                            record["trade_plan"] = {
+                                "status": "NO_TRADE", "execution_timeframe": "1m",
+                                "alternative_execution_timeframe": "5m",
+                                "confirmation_timeframe": "5m", "context_timeframe": "15m",
+                                "reason": "No saved 15-minute final review; the 5-minute check cannot create an independent event trade plan.",
+                            }
+                        else:
+                            record["trade_plan"] = ee.build_event_trade_plan(record["analysis"], snapshot)
                         saved_event = ee.get_event(event["id"]) or event
                         saved_event.setdefault("checkpoints", {})[checkpoint] = record
                         if saved_event.get("history"):
