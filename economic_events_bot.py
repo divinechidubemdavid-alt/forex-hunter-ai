@@ -764,8 +764,65 @@ async def economic_events_loop(application):
                         saved_event.setdefault("checkpoints", {})[checkpoint] = record
                         if saved_event.get("history"):
                             saved_event["history"][-1] = record
+                        # Start automatic hypothetical trade tracking only after the
+                        # 5m verification confirms a qualified conditional setup.
+                        if checkpoint == "5m" and record.get("trade_plan", {}).get("status") == "CONDITIONAL_SETUP":
+                            plan = record["trade_plan"]
+                            if not saved_event.get("event_trade"):
+                                saved_event["event_trade"] = {
+                                    "status": "WAITING_ENTRY",
+                                    "result": "PENDING",
+                                    "side": plan.get("side"),
+                                    "market": plan.get("market"),
+                                    "entry_trigger": plan.get("entry_trigger"),
+                                    "stop_loss": plan.get("stop_loss"),
+                                    "take_profits": plan.get("take_profits", [])[:3],
+                                    "hit_targets": [],
+                                    "created_at": datetime.now(timezone.utc).isoformat(),
+                                    "source_checkpoint": "5m",
+                                    "tracking_type": "AUTOMATIC_MARKET_SIMULATION",
+                                    "note": "Waiting for the entry trigger; this is not a broker order.",
+                                }
                         ee.save_event(saved_event)
                     await _send_event_alert(application, event, checkpoint, record, market_chart)
+            # Monitor qualified event setups from completed 5m candles. This is
+            # price-path tracking only: no broker order is opened or closed.
+            for tracked in ee.list_events(include_past=True, limit=300, user_id="*"):
+                trade = tracked.get("event_trade") or {}
+                if trade.get("status") not in {"WAITING_ENTRY", "MONITORING", "WIN"}:
+                    continue
+                if 3 in trade.get("hit_targets", []):
+                    continue
+                if ee._parse_dt(tracked["scheduled_at"]) > now:
+                    continue
+                last_check = trade.get("last_monitor_request_at")
+                if last_check:
+                    try:
+                        if now - ee._parse_dt(last_check) < timedelta(minutes=5):
+                            continue
+                    except (TypeError, ValueError):
+                        pass
+                trade["last_monitor_request_at"] = now.isoformat()
+                tracked["event_trade"] = trade
+                ee.save_event(tracked)
+                try:
+                    monitor = await research.technical_snapshot(tracked, "15m")
+                    monitor.pop("_frame", None)
+                    if monitor.get("status") == "AVAILABLE":
+                        previous_status = trade.get("status")
+                        previous_targets = list(trade.get("hit_targets", []))
+                        event_history.update_event_trade_progress(tracked, monitor)
+                        updated_trade = tracked.get("event_trade") or trade
+                        updated_trade["last_monitor_request_at"] = now.isoformat()
+                        ee.save_event(tracked)
+                        if (updated_trade.get("status"), updated_trade.get("hit_targets")) != (previous_status, previous_targets):
+                            log.info(
+                                "Economic event trade progress %s: %s %s",
+                                tracked.get("title"), updated_trade.get("status"),
+                                updated_trade.get("hit_targets"),
+                            )
+                except Exception:
+                    log.exception("Economic event trade monitoring failed for %s", tracked.get("id"))
         except Exception:
             log.exception("Economic event scheduler iteration failed")
         await asyncio.sleep(20)
