@@ -97,6 +97,17 @@ async def show_event_center(update, context):
     )
 
 
+def _events_for_display(events, include_past, now=None):
+    """Split event cards strictly at scheduled release time."""
+    now = ee._parse_dt(now or datetime.now(timezone.utc))
+    rows = [
+        event for event in events
+        if (ee._parse_dt(event["scheduled_at"]) <= now if include_past
+            else ee._parse_dt(event["scheduled_at"]) > now)
+    ]
+    return sorted(rows, key=lambda event: event.get("scheduled_at", ""), reverse=bool(include_past))
+
+
 async def _event_artwork_photo(event):
     """Reuse the exact event artwork across Upcoming, History and Performance."""
     artwork = event.get("event_artwork") or {}
@@ -125,15 +136,8 @@ async def _send_event_artwork(chat, event, caption=None):
 
 async def _show_list(chat, include_past, user_id):
     # Display sections are mutually exclusive at the exact scheduled release time.
-    now = datetime.now(timezone.utc)
     all_rows = ee.list_events(include_past=True, limit=300, user_id=user_id)
-    rows = [
-        event for event in all_rows
-        if (ee._parse_dt(event["scheduled_at"]) < now if include_past
-            else ee._parse_dt(event["scheduled_at"]) > now)
-    ]
-    rows.sort(key=lambda event: event.get("scheduled_at", ""), reverse=bool(include_past))
-    rows = rows[:25]
+    rows = _events_for_display(all_rows, include_past)[:25]
     if not rows:
         label = "past events" if include_past else "upcoming events"
         await chat.send_message(f"No {label} are saved yet. Official calendar sync runs automatically.")
@@ -235,12 +239,10 @@ async def handle_event_callback(update, context):
     elif data == "econ:history":
         await _show_list(query.message.chat, True, user_id)
     elif data == "econ:performance":
-        now = datetime.now(timezone.utc)
-        rows = [
-            item for item in ee.list_events(include_past=True, limit=300, user_id=user_id)
-            if ee._parse_dt(item["scheduled_at"]) < now
-        ]
-        rows.sort(key=lambda item: item.get("scheduled_at", ""), reverse=True)
+        rows = _events_for_display(
+            ee.list_events(include_past=True, limit=300, user_id=user_id),
+            include_past=True,
+        )
         stats = event_history.performance_summary(rows)
         dashboard = event_visuals.render_performance_dashboard(rows, stats)
         await query.message.reply_photo(
