@@ -438,6 +438,7 @@ def update_signal(signal_id, updates):
         "tp3_hit",
         "stop_loss_hit",
         "last_checked",
+        "last_price_timestamp",
         "result_r",
         "realised_r",
         "trend_warning_key",
