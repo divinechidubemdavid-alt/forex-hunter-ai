@@ -49,6 +49,18 @@ class EconomicEventTradeTrackingTests(unittest.TestCase):
         self.assertEqual(event["event_trade"]["status"], "WIN")
         self.assertEqual(event["event_trade"]["result"], "WIN")
 
+    def test_ambiguous_later_target_does_not_remove_tp1_win_or_claim_tp2(self):
+        event = self.trade_event()
+        event["event_trade"]["status"] = "MONITORING"
+        history.update_event_trade_progress(
+            event, self.snapshot(106, 101, "2026-11-10T10:05:00+00:00")
+        )
+        history.update_event_trade_progress(
+            event, self.snapshot(111, 94, "2026-11-10T10:10:00+00:00")
+        )
+        self.assertEqual(event["event_trade"]["status"], "WIN")
+        self.assertEqual(event["event_trade"]["hit_targets"], [1])
+
     def test_stop_before_any_target_is_loss(self):
         event = self.trade_event()
         event["event_trade"]["status"] = "MONITORING"
