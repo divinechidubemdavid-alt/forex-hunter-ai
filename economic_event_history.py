@@ -42,7 +42,7 @@ def update_event_trade_progress(event: dict, snapshot: dict) -> dict:
     still tracked; a later retracement can never turn a TP1/TP2 win into a loss.
     """
     trade = event.get("event_trade") or {}
-    if trade.get("status") not in {"MONITORING", "WIN"} or snapshot.get("status") != "AVAILABLE":
+    if trade.get("status") not in {"WAITING_ENTRY", "MONITORING", "WIN"} or snapshot.get("status") != "AVAILABLE":
         return trade
     candle_time = snapshot.get("candle_time")
     if candle_time and candle_time == trade.get("last_candle_time"):
@@ -52,10 +52,22 @@ def update_event_trade_progress(event: dict, snapshot: dict) -> dict:
         low = float(snapshot["signal_candle_low"])
         stop = float(trade["stop_loss"])
         targets = [float(value) for value in trade.get("take_profits", [])[:3]]
+        entry = float(trade["entry_trigger"])
     except (KeyError, TypeError, ValueError):
         return trade
     side = str(trade.get("side", "")).upper()
     hits = set(trade.get("hit_targets", []))
+    if trade.get("status") == "WAITING_ENTRY":
+        entry_hit = high >= entry if side == "BUY" else low <= entry if side == "SELL" else False
+        if entry_hit:
+            trade["status"] = "MONITORING"
+            trade["entered_at"] = candle_time
+            trade["entry_price"] = entry
+            trade["note"] = "Entry trigger reached; target/stop checks begin on the next completed candle."
+        trade["last_candle_time"] = candle_time
+        trade["last_checked_at"] = snapshot.get("retrieved_at")
+        event["event_trade"] = trade
+        return trade
     if side == "BUY":
         stop_hit = low <= stop
         target_hits = [i + 1 for i, target in enumerate(targets) if high >= target]
@@ -65,16 +77,15 @@ def update_event_trade_progress(event: dict, snapshot: dict) -> dict:
     else:
         return trade
 
-    # If the same OHLC candle spans both the stop and a new target, its intrabar
-    # sequence is unknowable. Preserve prior wins; otherwise mark it unscored.
+    # If one OHLC candle spans a stop and a new target, its intrabar sequence
+    # is unknowable. A prior TP win remains a win regardless of later reversal.
     new_hits = [index for index in target_hits if index not in hits]
     if stop_hit and new_hits and not hits:
         trade["status"] = "AMBIGUOUS"
         trade["result"] = "UNSCORED"
         trade["note"] = "One candle touched both stop and target; intrabar order is unknown."
     else:
-        for index in new_hits:
-            hits.add(index)
+        hits.update(new_hits)
         if hits:
             trade["status"] = "WIN"
             trade["result"] = "WIN"
