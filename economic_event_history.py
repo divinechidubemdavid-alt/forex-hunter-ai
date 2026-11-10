@@ -216,5 +216,9 @@ def performance_summary(events: list[dict]) -> dict:
         round(summary["confidence_total"] / summary["confidence_count"], 1)
         if summary["confidence_count"] else None
     )
+    buy_trades = summary["buy_wins"] + summary["buy_losses"]
+    sell_trades = summary["sell_wins"] + summary["sell_losses"]
+    summary["buy_trade_win_rate_pct"] = round(100 * summary["buy_wins"] / buy_trades, 1) if buy_trades else None
+    summary["sell_trade_win_rate_pct"] = round(100 * summary["sell_wins"] / sell_trades, 1) if sell_trades else None
     summary["net_r"] = round(summary["net_r"], 2)
     return summary
