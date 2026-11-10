@@ -11,6 +11,7 @@ from telegram.ext import CommandHandler
 from chart import create_market_chart
 import economic_events as ee
 import economic_event_history as event_history
+import economic_event_visuals as event_visuals
 import economic_research as research
 import trading_economics as te
 import state
@@ -90,16 +91,49 @@ async def show_event_center(update, context):
     )
 
 
+async def _event_artwork_photo(event):
+    """Reuse the exact event artwork across Upcoming, History and Performance."""
+    artwork = event.get("event_artwork") or {}
+    if artwork.get("file_id"):
+        return artwork["file_id"]
+    return event_visuals.render_event_artwork(event)
+
+
 async def _show_list(chat, include_past, user_id):
-    rows = ee.list_events(include_past=include_past, limit=25, user_id=user_id)
+    # Display sections are mutually exclusive at the exact scheduled release time.
+    now = datetime.now(timezone.utc)
+    all_rows = ee.list_events(include_past=True, limit=300, user_id=user_id)
+    rows = [
+        event for event in all_rows
+        if (ee._parse_dt(event["scheduled_at"]) < now if include_past
+            else ee._parse_dt(event["scheduled_at"]) > now)
+    ]
+    rows.sort(key=lambda event: event.get("scheduled_at", ""), reverse=bool(include_past))
+    rows = rows[:25]
     if not rows:
-        await chat.send_message("No matching economic events are saved yet. Official BLS calendar sync runs automatically.")
+        label = "past events" if include_past else "upcoming events"
+        await chat.send_message(f"No {label} are saved yet. Official calendar sync runs automatically.")
         return
     for event in rows:
         buttons = [InlineKeyboardButton("🔎 Analysis & history", callback_data=f'econ:view:{event["id"]}')]
         if event.get("post_event_report"):
             buttons.append(InlineKeyboardButton("📊 Post-event report", callback_data=f'econ:post:{event["id"]}'))
-        await chat.send_message(_event_text(event), reply_markup=InlineKeyboardMarkup([buttons]))
+        photo = await _event_artwork_photo(event)
+        try:
+            sent = await chat.send_photo(
+                photo=photo, caption=_event_text(event),
+                reply_markup=InlineKeyboardMarkup([buttons]),
+            )
+            if sent.photo and not (event.get("event_artwork") or {}).get("file_id"):
+                event["event_artwork"] = {
+                    "file_id": sent.photo[-1].file_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "kind": "event_artwork",
+                }
+                ee.save_event(event)
+        except Exception:
+            log.exception("Could not deliver event artwork for %s", event.get("id"))
+            await chat.send_message(_event_text(event), reply_markup=InlineKeyboardMarkup([buttons]))
 
 
 def _owns_event(event, user_id):
@@ -177,47 +211,59 @@ async def handle_event_callback(update, context):
     elif data == "econ:history":
         await _show_list(query.message.chat, True, user_id)
     elif data == "econ:performance":
-        rows = ee.list_events(include_past=True, limit=300, user_id=user_id)
+        now = datetime.now(timezone.utc)
+        rows = [
+            item for item in ee.list_events(include_past=True, limit=300, user_id=user_id)
+            if ee._parse_dt(item["scheduled_at"]) < now
+        ]
+        rows.sort(key=lambda item: item.get("scheduled_at", ""), reverse=True)
         stats = event_history.performance_summary(rows)
-        accuracy = (f'{stats["directional_accuracy_pct"]}%' if stats["directional_accuracy_pct"] is not None else "Not enough scored outcomes yet")
-        await query.message.reply_text(
-            "📈 ECONOMIC EVENT PERFORMANCE\n\n"
-            f'Events recorded: {stats["events"]}\n'
-            f'15-minute bullish forecasts: {stats["bullish"]}\n'
-            f'15-minute bearish forecasts: {stats["bearish"]}\n'
-            f'No clear direction / other: {stats["no_clear_direction"]}\n'
-            f'Not yet finalized: {stats["not_finalized"]}\n'
-            f'Directional accuracy: {accuracy} ({stats["directional_correct"]}/{stats["directional_scored"]} scored events)\n'
-            f'Trade outcomes recorded: {stats["trades_scored"]}\n'
-            f'Trade wins/losses: {stats["trade_wins"]}/{stats["trade_losses"]}\n'
-            f'Net recorded performance: {stats["net_r"]:+.2f}R\n'
-            f'Unscored events: {stats["unscored"]}\n\n'
-            "Accuracy uses recorded post-release market reactions. Missing evidence is never counted as a win or loss. Event chart images follow below."
+        dashboard = event_visuals.render_performance_dashboard(rows, stats)
+        await query.message.reply_photo(
+            photo=dashboard,
+            caption=(
+                "📊 ECONOMIC EVENT PERFORMANCE — individual event results and the collective report.\n"
+                "Illustrated metrics are calculated only from saved evidence. TP1, TP2 and TP3 each count as wins."
+            ),
         )
-        # Show each event's own saved market chart (or clearly labelled event
-        # image fallback) instead of leaving Performance as text-only.
-        for item in sorted(rows, key=lambda row: row.get("scheduled_at", ""), reverse=True)[:25]:
-            checkpoints = item.get("checkpoints", {})
-            final = item.get("final_15m") or checkpoints.get("15m") or {}
-            analysis = final.get("analysis") or (
-                (item.get("post_event_report") or {}).get("analysis")
+        # Keep the event's own visual identity and its real market chart together.
+        for item in rows[:25]:
+            analysis = (
+                (item.get("final_15m") or item.get("checkpoints", {}).get("15m") or {}).get("analysis")
+                or (item.get("post_event_report") or {}).get("analysis")
                 or ee.directional_analysis(item, phase="post-event" if item.get("actual") is not None else "pre-event")
             )
-            direction = analysis.get("combined_direction", analysis.get("direction", "UNSCORED"))
-            photo, chart_meta = await _event_chart_photo(item, refresh_market=False)
-            caption = (
-                f'📊 {item.get("title", "Economic event")}\n'
-                f'Market direction: {direction} | Confidence: {analysis.get("confidence", "N/A")}/100\n'
-                f'Chart: {chart_meta.get("market", "Event summary")} '
-                f'{chart_meta.get("timeframe", "")} [{chart_meta.get("chart_type", "event_summary")}]'
-            )
+            artwork = await _event_artwork_photo(item)
             try:
-                if hasattr(photo, "seek"):
-                    photo.seek(0)
-                sent = await query.message.reply_photo(photo=photo, caption=caption[:1020])
-                if sent.photo:
+                sent_art = await query.message.reply_photo(
+                    photo=artwork,
+                    caption=f'🗂 {item.get("title", "Economic event")} — individual event identity\n'
+                            f'Direction: {analysis.get("combined_direction", analysis.get("direction", "UNSCORED"))} | '
+                            f'Confidence: {analysis.get("confidence", "N/A")}/100',
+                )
+                if sent_art.photo and not (item.get("event_artwork") or {}).get("file_id"):
+                    item["event_artwork"] = {
+                        "file_id": sent_art.photo[-1].file_id,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "kind": "event_artwork",
+                    }
+                    ee.save_event(item)
+            except Exception:
+                log.exception("Could not display event artwork in performance for %s", item.get("id"))
+            chart, chart_meta = await _event_chart_photo(item, refresh_market=False)
+            try:
+                if hasattr(chart, "seek"):
+                    chart.seek(0)
+                sent_chart = await query.message.reply_photo(
+                    photo=chart,
+                    caption=f'📈 {item.get("title", "Economic event")} — '
+                            f'{chart_meta.get("market", "Event summary")} '
+                            f'{chart_meta.get("timeframe", "")} '
+                            f'[{chart_meta.get("chart_type", "event_summary")}]',
+                )
+                if sent_chart.photo:
                     item.setdefault("chart_images", []).append({
-                        "file_id": sent.photo[-1].file_id,
+                        "file_id": sent_chart.photo[-1].file_id,
                         "checkpoint": "performance_view",
                         "created_at": datetime.now(timezone.utc).isoformat(),
                         "event_id": item["id"],
