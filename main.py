@@ -32,7 +32,7 @@ async def post_init(application):
     application.create_task(
         monitor_signals_loop(application),
         name="forex-hunter-signal-monitor",
-    ),
+    )
     application.create_task(
         live_price_stream_loop(application),
         name="forex-hunter-live-price-stream",
