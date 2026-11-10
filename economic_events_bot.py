@@ -827,7 +827,7 @@ async def economic_events_loop(application):
                 trade = tracked.get("event_trade") or {}
                 if trade.get("status") not in {"WAITING_ENTRY", "MONITORING", "WIN"}:
                     continue
-                if 3 in trade.get("hit_targets", []):
+                if 3 in trade.get("hit_targets", []) or trade.get("exit_reason"):
                     continue
                 if ee._parse_dt(tracked["scheduled_at"]) > now:
                     continue
