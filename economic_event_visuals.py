@@ -7,7 +7,7 @@ import re
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle, Rectangle, Polygon
+from matplotlib.patches import Circle, Rectangle, Polygon, Wedge
 
 BG = "#080B0A"
 PANEL = "#101613"
@@ -171,16 +171,34 @@ def render_performance_dashboard(events: list[dict], stats: dict):
             ax.add_patch(Rectangle((126, y-0.5), 14*max(0,min(100,value))/100, 1.3, facecolor=color, edgecolor="none"))
 
     ax.add_patch(Rectangle((94, 22), 51, 27, facecolor=PANEL, edgecolor="#26332B", linewidth=1))
-    ax.text(97, 45, "PERFORMANCE BY EVENT TYPE", color=GOLD, fontsize=10, weight="bold")
+    ax.text(97, 45, "EVENT TYPES  /  TRADE OUTCOME MIX", color=GOLD, fontsize=9, weight="bold")
     buckets = stats.get("by_event_type", {})
-    items = sorted(buckets.items(), key=lambda item: item[1].get("events", 0), reverse=True)[:5]
+    items = sorted(buckets.items(), key=lambda item: item[1].get("events", 0), reverse=True)[:4]
     for i, (name, bucket) in enumerate(items):
         y = 39 - i * 4
         scored = bucket.get("directional_scored", 0)
         pct = round(100 * bucket.get("directional_correct", 0) / scored, 1) if scored else None
-        ax.text(98, y, name, color=TEXT, fontsize=8)
-        ax.text(119, y, f'{pct}%' if pct is not None else "N/A", color=GREEN if pct is not None else MUTED, fontsize=8, weight="bold")
-        ax.text(137, y, f'{bucket.get("events",0)} events', color=MUTED, fontsize=7, ha="right")
+        ax.text(98, y, name[:12], color=TEXT, fontsize=7)
+        ax.text(111, y, f'{pct}%' if pct is not None else "N/A", color=GREEN if pct is not None else MUTED, fontsize=7, weight="bold")
+    # Outcome donut: partial wins are a subset of wins, so separate them from
+    # full wins here to avoid double-counting the total number of trades.
+    full_wins = max(0, stats.get("trade_wins", 0) - stats.get("partial_wins", 0))
+    outcome_values = [full_wins, stats.get("partial_wins", 0), stats.get("trade_losses", 0), stats.get("no_trade", 0)]
+    outcome_colors = [GREEN, GOLD, RED, BLUE]
+    total_outcomes = sum(outcome_values)
+    start_angle = 90
+    if total_outcomes:
+        for value, color in zip(outcome_values, outcome_colors):
+            if value <= 0:
+                continue
+            end_angle = start_angle - 360 * value / total_outcomes
+            ax.add_patch(Wedge((132, 34), 8, end_angle, start_angle, width=3,
+                               facecolor=color, edgecolor=BG, linewidth=0.8))
+            start_angle = end_angle
+    ax.text(132, 34, str(total_outcomes), color=TEXT, fontsize=11, weight="bold", ha="center", va="center")
+    for i, (label, color) in enumerate(zip(("WIN", "PARTIAL", "LOSS", "NO TRADE"), outcome_colors)):
+        ax.add_patch(Rectangle((122, 24+i*4.2), 1.5, 1.5, facecolor=color, edgecolor="none"))
+        ax.text(124, 24.2+i*4.2, label, color=TEXT, fontsize=6.5)
 
     ax.text(5, 14, f'PARTIAL WINS: {stats.get("partial_wins", 0)}     NO-TRADE DECISIONS: {stats.get("no_trade", 0)}     '
                     f'ACTIVE TRACKING: {stats.get("monitoring", 0)}     AVG CONFIDENCE: '
