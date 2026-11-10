@@ -263,6 +263,13 @@ def build_event_trade_plan(analysis, snapshot):
     if direction not in {"BULLISH", "BEARISH"}:
         plan["reason"] = "No clear fundamental direction; do not trade this event."
         return plan
+    fundamental_direction = (analysis or {}).get("fundamental_direction")
+    if fundamental_direction not in {"BULLISH", "BEARISH"}:
+        plan["reason"] = "Fundamental event evidence is insufficient; technical-only bias is not enough for an event trade."
+        return plan
+    if (analysis or {}).get("confidence", 0) < 40:
+        plan["reason"] = "Event-direction confidence is too low for a trade plan."
+        return plan
     if not isinstance(snapshot, dict) or snapshot.get("status") != "AVAILABLE":
         plan["reason"] = "Fresh completed-candle technical data is unavailable; no entry plan."
         return plan
@@ -321,7 +328,7 @@ def build_event_trade_plan(analysis, snapshot):
         "risk_reward": "1R / 2R / 3R",
         "entry_condition": trigger,
         "invalidation": "Cancel the setup if the 5-minute direction loses EMA/ADX alignment or price invalidates the structural stop.",
-        "execution_note": "Use 1m for the entry only after 5m confirmation. If 1m is too noisy, wait for a 5m candle close. Never chase the first CPI/news spike.",
+        "execution_note": "Use 1m for the entry only after 5m confirmation. If 1m is too noisy, wait for a 5m candle close. Never chase the first CPI/news spike. Levels use Twelve Data candles; confirm your broker's live quote, spread and tick size before acting.",
         "source_timeframe": snapshot.get("timeframe"),
         "source_candle_time": snapshot.get("candle_time"),
         "reason": "Fundamental event-currency bias and completed-candle technical confirmation align.",
