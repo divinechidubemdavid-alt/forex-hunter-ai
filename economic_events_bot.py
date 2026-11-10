@@ -258,6 +258,7 @@ async def handle_event_callback(update, context):
             f'{history_plan.get("execution_timeframe", "1m")} entry / '
             f'{history_plan.get("confirmation_timeframe", "5m")} confirmation / '
             f'{history_plan.get("context_timeframe", "15m")} context'
+            f'\n{history_plan.get("context_note", "15m is wider chart context; automated confirmation uses 5m.")}'
             f'\nTRADE PLAN: {history_plan.get("status", "NOT YET AVAILABLE")} — '
             f'{history_plan.get("reason", "Await the final review.")}'
         )
@@ -479,6 +480,7 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f"\nExecution: {trade_plan.get('execution_timeframe', '1m')} | "
         f"Confirmation: {trade_plan.get('confirmation_timeframe', '5m')} | "
         f"Context: {trade_plan.get('context_timeframe', '15m')}"
+        f"\n{trade_plan.get('context_note', 'Use 15m for wider structure; automated confirmation is 5m.')}"
         f"\nReason: {trade_plan.get('reason', 'Await the final 15m review.')}"
     )
     if trade_plan.get("status") == "CONDITIONAL_SETUP":
