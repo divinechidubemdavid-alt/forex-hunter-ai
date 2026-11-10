@@ -153,15 +153,22 @@ def render_performance_dashboard(events: list[dict], stats: dict):
         ax.text(78, y, f"{confidence}%" if confidence is not None else "—", color=TEXT, fontsize=8)
 
     # Collective direction and event-type panels.
-    ax.add_patch(Rectangle((94, 52), 51, 21, facecolor=PANEL, edgecolor="#26332B", linewidth=1))
-    ax.text(97, 69, "BUY / SELL DIRECTIONAL ACCURACY", color=GOLD, fontsize=10, weight="bold")
-    for i, (label, key, color) in enumerate((("BUY", "buy_accuracy_pct", GREEN), ("SELL", "sell_accuracy_pct", RED))):
+    ax.add_patch(Rectangle((94, 49), 51, 24, facecolor=PANEL, edgecolor="#26332B", linewidth=1))
+    ax.text(97, 69, "BUY / SELL PERFORMANCE", color=GOLD, fontsize=10, weight="bold")
+    direction_rows = (
+        ("BUY accuracy", "buy_accuracy_pct", GREEN),
+        ("BUY trade win", "buy_trade_win_rate_pct", GREEN),
+        ("SELL accuracy", "sell_accuracy_pct", RED),
+        ("SELL trade win", "sell_trade_win_rate_pct", RED),
+    )
+    for i, (label, key, color) in enumerate(direction_rows):
+        y = 63 - i * 4.5
         value = stats.get(key)
-        ax.text(98, 62-i*6, label, color=color, fontsize=9, weight="bold")
-        ax.text(112, 62-i*6, f"{value}%" if value is not None else "N/A", color=TEXT, fontsize=10, weight="bold")
-        ax.add_patch(Rectangle((124, 60-i*6), 16, 2, facecolor="#26332B", edgecolor="none"))
+        ax.text(98, y, label, color=color, fontsize=7.5, weight="bold")
+        ax.text(117, y, f"{value}%" if value is not None else "N/A", color=TEXT, fontsize=8, weight="bold")
+        ax.add_patch(Rectangle((126, y-0.5), 14, 1.3, facecolor="#26332B", edgecolor="none"))
         if value is not None:
-            ax.add_patch(Rectangle((124, 60-i*6), 16*max(0,min(100,value))/100, 2, facecolor=color, edgecolor="none"))
+            ax.add_patch(Rectangle((126, y-0.5), 14*max(0,min(100,value))/100, 1.3, facecolor=color, edgecolor="none"))
 
     ax.add_patch(Rectangle((94, 22), 51, 27, facecolor=PANEL, edgecolor="#26332B", linewidth=1))
     ax.text(97, 45, "PERFORMANCE BY EVENT TYPE", color=GOLD, fontsize=10, weight="bold")
