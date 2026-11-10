@@ -1,5 +1,6 @@
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -10,12 +11,17 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 import state
 from config import MARKETS
 from market_data import fetch_candles, MarketDataError
+from config import TWELVE_DATA_API_KEY
+import websockets
 from strategy import assess_trend_health
 from chart import create_market_chart
 
 logger = logging.getLogger(__name__)
 
 MONITOR_INTERVAL_SECONDS = 15 * 60
+PRICE_STREAM_URL = "wss://ws.twelvedata.com/v1/quotes/price"
+PRICE_STREAM_HEARTBEAT_SECONDS = 10
+PRICE_STREAM_RECONNECT_MAX_SECONDS = 60
 PARTIAL_FRACTION = 1.0 / 3.0
 
 
@@ -312,6 +318,288 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
             )
     else:
         state.update_signal(signal_id, updates)
+
+
+
+def _stream_symbols():
+    """Return the active tracked symbols, bounded by the provider's 8 trial slots."""
+    symbols = set()
+    for user_id in state.get_users():
+        try:
+            if not state.user_monitoring_enabled(user_id):
+                continue
+            for signal in state.get_tracked_signals(user_id):
+                symbol = signal.get("symbol")
+                if symbol in MARKETS:
+                    symbols.add(symbol)
+        except Exception:
+            logger.exception("Could not collect symbols for the live price stream.")
+    return sorted(symbols)[:8]
+
+
+async def _check_one_price(app, user_id, signal, quote):
+    """Record target/stop milestones from each live quote, independent of chart timeframe."""
+    signal_id = _signal_id(signal)
+    if signal_id is None or signal.get("status") != "TRACKING":
+        return
+
+    direction = str(signal.get("direction") or "").upper()
+    if direction not in {"BUY", "SELL"}:
+        return
+
+    # A long position exits on bid; a short position exits on ask.
+    raw_price = quote.get("bid") if direction == "BUY" else quote.get("ask")
+    if raw_price is None:
+        raw_price = quote.get("price")
+    price = _number(raw_price)
+    if price is None:
+        return
+
+    timestamp = quote.get("timestamp")
+    try:
+        tick_time = datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        tick_time = datetime.now(timezone.utc)
+
+    tick_iso = tick_time.isoformat()
+    previous_tick = _timestamp(signal.get("last_price_timestamp"))
+    if previous_tick is not None and pd.Timestamp(tick_time) <= previous_tick:
+        return
+
+    entry = _number(signal.get("entry"))
+    stop = _number(signal.get("stop_loss"))
+    targets = _targets(signal)
+    if entry is None or stop is None or any(value is None for value in targets):
+        logger.warning("Signal %s has incomplete price levels.", signal_id)
+        return
+    if abs(entry - stop) <= 0:
+        return
+
+    flags = [bool(signal.get(f"tp{i}_hit")) for i in (1, 2, 3)]
+    previous_price = _number(signal.get("current_price"))
+
+    if direction == "BUY":
+        stop_hit = price <= stop
+        target_hits = [price >= target for target in targets]
+        crossed_stop_and_target = (
+            previous_price is not None
+            and previous_price >= min(targets[i] for i in range(3) if not flags[i])
+            and price <= stop
+            if not all(flags) else False
+        )
+    else:
+        stop_hit = price >= stop
+        target_hits = [price <= target for target in targets]
+        crossed_stop_and_target = (
+            previous_price is not None
+            and previous_price <= max(targets[i] for i in range(3) if not flags[i])
+            and price >= stop
+            if not all(flags) else False
+        )
+
+    newly_hit = [target_hits[i] and not flags[i] for i in range(3)]
+    settings = state.get_user_settings(user_id) or {}
+
+    if crossed_stop_and_target:
+        state.update_signal(signal_id, {
+            "current_price": price,
+            "last_price_timestamp": tick_iso,
+        })
+        state.add_signal_event(
+            signal_id, "AMBIGUOUS",
+            "A price gap crossed both an unrecorded target and stop loss "
+            "between received quotes; the execution order cannot be established.",
+            {"previous_price": previous_price, "price": price, "timestamp": tick_iso},
+        )
+        state.complete_signal(
+            signal_id, "AMBIGUOUS",
+            "Outcome requires review because a price gap crossed both a target and stop.",
+        )
+        await _notify(
+            app, user_id, settings, "system",
+            f"⚠️ {signal.get('symbol', 'Signal')}: price gap crossed both a target "
+            "and stop loss between quotes. Outcome marked ambiguous for review.",
+        )
+        return
+
+    updates = {"current_price": price, "last_price_timestamp": tick_iso}
+    if stop_hit:
+        realised = _realised_r(flags, stop_hit=True)
+        updates.update({
+            "stop_loss_hit": True,
+            "realised_r": realised,
+            "result_r": realised,
+        })
+        state.update_signal(signal_id, updates)
+        state.add_signal_event(
+            signal_id, "STOP_LOSS",
+            f"Stop loss reached from live price stream. Realised result: {realised:+.2f}R.",
+            {"price": price, "realised_r": realised, "timestamp": tick_iso},
+        )
+        state.complete_signal(
+            signal_id, "STOP_LOSS",
+            f"Stop loss reached. Realised result: {realised:+.2f}R.",
+        )
+        await _notify(
+            app, user_id, settings, "stop_loss",
+            f"🛑 {signal.get('symbol', 'Signal')}: stop loss reached. "
+            f"Live quote: {price:g}. Realised result: {realised:+.2f}R.",
+        )
+        return
+
+    milestones = []
+    for index in range(3):
+        if newly_hit[index]:
+            flags[index] = True
+            number = index + 1
+            realised = _realised_r(flags)
+            updates[f"tp{number}_hit"] = True
+            updates["realised_r"] = realised
+            updates["result_r"] = realised
+            milestones.append((number, realised, targets[index]))
+
+    state.update_signal(signal_id, updates)
+    for number, realised, target_price in milestones:
+        state.add_signal_event(
+            signal_id, f"TP{number}",
+            f"TP{number} reached from live price stream. "
+            f"One-third partial exit recorded. Realised result: {realised:+.2f}R.",
+            {
+                "target_price": target_price,
+                "price": price,
+                "target_r": number,
+                "realised_r": realised,
+                "timestamp": tick_iso,
+                "price_source": "Twelve Data WebSocket",
+            },
+        )
+
+    if flags[2]:
+        state.complete_signal(
+            signal_id, "TP3",
+            "TP3 reached from live price stream. All three one-third partial exits recorded. "
+            "Total realised result: +2.00R.",
+        )
+
+    for number, realised, _ in milestones:
+        keyboard = None
+        if number in (1, 2) and number == max(item[0] for item in milestones):
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    f"🔒 Secure profit — close after TP{number}",
+                    callback_data=f"manualclose:{signal_id}",
+                )],
+                [InlineKeyboardButton(
+                    "▶️ Continue tracking",
+                    callback_data=f"manualcontinue:{signal_id}",
+                )],
+            ])
+        message = (
+            f"🎯 {signal.get('symbol', 'Signal')}: TP{number} reached. "
+            f"Live quote: {price:g}. One-third partial exit recorded. "
+            f"Realised result: {realised:+.2f}R."
+        )
+        if keyboard:
+            message += (
+                f"\n\nWould you like to close and record a TP{number} "
+                "milestone win, or continue towards the next target?"
+            )
+        await _notify(app, user_id, settings, f"tp{number}", message, reply_markup=keyboard)
+
+
+async def _process_stream_quote(app, quote):
+    symbol = str(quote.get("symbol") or "").strip().upper()
+    if symbol not in MARKETS:
+        return
+    for user_id in state.get_users():
+        try:
+            if not state.user_monitoring_enabled(user_id):
+                continue
+            for signal in state.get_tracked_signals(user_id):
+                if str(signal.get("symbol", "")).upper() == symbol:
+                    current = state.get_signal(_signal_id(signal), user_id)
+                    if current and current.get("status") == "TRACKING":
+                        await _check_one_price(app, user_id, current, quote)
+        except Exception:
+            logger.exception("Live quote processing failed for %s / user %s.", symbol, user_id)
+
+
+async def live_price_stream_loop(app):
+    """One shared Twelve Data WebSocket connection; REST credits are not consumed by ticks."""
+    if not TWELVE_DATA_API_KEY:
+        logger.warning("Live price stream disabled: Twelve Data API key is missing.")
+        return
+
+    backoff = 5
+    while True:
+        try:
+            symbols = _stream_symbols()
+            if not symbols:
+                await asyncio.sleep(15)
+                continue
+
+            uri = f"{PRICE_STREAM_URL}?apikey={TWELVE_DATA_API_KEY}"
+            async with websockets.connect(
+                uri, ping_interval=None, open_timeout=15, close_timeout=5
+            ) as websocket:
+                await websocket.send(json.dumps({
+                    "action": "subscribe",
+                    "params": {"symbols": ",".join(symbols)},
+                }))
+                logger.info("Requested live price subscriptions for %s.", ", ".join(symbols))
+                backoff = 5
+                last_heartbeat = asyncio.get_running_loop().time()
+                last_refresh = last_heartbeat
+
+                while True:
+                    now = asyncio.get_running_loop().time()
+                    if now - last_heartbeat >= PRICE_STREAM_HEARTBEAT_SECONDS:
+                        await websocket.send(json.dumps({"action": "heartbeat"}))
+                        last_heartbeat = now
+                    if now - last_refresh >= 60:
+                        latest_symbols = _stream_symbols()
+                        if latest_symbols != symbols:
+                            await websocket.send(json.dumps({"action": "reset"}))
+                            symbols = latest_symbols
+                            if symbols:
+                                await websocket.send(json.dumps({
+                                    "action": "subscribe",
+                                    "params": {"symbols": ",".join(symbols)},
+                                }))
+                            logger.info("Refreshed live price subscriptions: %s.", ", ".join(symbols))
+                        last_refresh = now
+
+                    try:
+                        raw = await asyncio.wait_for(websocket.recv(), timeout=1)
+                    except asyncio.TimeoutError:
+                        continue
+
+                    try:
+                        payload = json.loads(raw)
+                    except (TypeError, ValueError):
+                        logger.warning("Ignored malformed Twelve Data WebSocket message.")
+                        continue
+
+                    if payload.get("event") == "price":
+                        await _process_stream_quote(app, payload)
+                    elif payload.get("event") == "subscribe-status":
+                        failed = payload.get("fails") or []
+                        if failed:
+                            logger.warning("Twelve Data rejected live subscriptions: %s", failed)
+                        logger.info(
+                            "Twelve Data subscription status: %s successful, %s failed.",
+                            len(payload.get("success") or []), len(failed),
+                        )
+                    elif payload.get("status") == "error":
+                        logger.error("Twelve Data WebSocket error: %s", payload)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Live price stream disconnected; reconnecting in %s seconds.", backoff
+            )
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, PRICE_STREAM_RECONNECT_MAX_SECONDS)
 
 
 
