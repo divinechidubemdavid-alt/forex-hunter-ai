@@ -35,7 +35,8 @@ class EconomicEventTests(unittest.TestCase):
         event = {"scheduled_at": (now + timedelta(minutes=4)).isoformat(), "checkpoints": {}}
         self.assertEqual(ee.due_checkpoints(event, now), ["5m"])
         event = {"scheduled_at": (now + timedelta(minutes=2)).isoformat(), "checkpoints": {}}
-        self.assertEqual(ee.due_checkpoints(event, now), [])
+        # The 5m reminder remains eligible until the event actually starts.
+        self.assertEqual(ee.due_checkpoints(event, now), ["5m"])
 
     def test_15m_checkpoint_remains_due_until_5m_window_begins(self):
         scheduled = datetime(2026, 11, 10, 14, 30, tzinfo=timezone.utc)
