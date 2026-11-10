@@ -32,9 +32,16 @@ class EconomicEventTests(unittest.TestCase):
         now = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
         event = {"scheduled_at": (now + timedelta(hours=23, minutes=45)).isoformat(), "checkpoints": {}}
         self.assertEqual(ee.due_checkpoints(event, now), ["24h"])
+        # 15m checkpoint remains eligible throughout its slot, not only five minutes.
+        event = {"scheduled_at": (now + timedelta(minutes=7)).isoformat(), "checkpoints": {}}
+        self.assertEqual(ee.due_checkpoints(event, now), ["15m"])
+        # Once the 5m window begins, do not send a stale 15m reminder.
         event = {"scheduled_at": (now + timedelta(minutes=4)).isoformat(), "checkpoints": {}}
         self.assertEqual(ee.due_checkpoints(event, now), ["5m"])
-        event = {"scheduled_at": (now + timedelta(minutes=2)).isoformat(), "checkpoints": {}}
+        event = {"scheduled_at": now.isoformat(), "checkpoints": {}}
+        self.assertEqual(ee.due_checkpoints(event, now), [])
+        # Already-sent checkpoints are never repeated.
+        event = {"scheduled_at": (now + timedelta(minutes=7)).isoformat(), "checkpoints": {"15m": {}}}
         self.assertEqual(ee.due_checkpoints(event, now), [])
 
     def test_create_and_list_event(self):
