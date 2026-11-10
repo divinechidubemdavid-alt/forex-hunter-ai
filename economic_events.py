@@ -257,6 +257,7 @@ def build_event_trade_plan(analysis, snapshot):
         "alternative_execution_timeframe": "5m",
         "confirmation_timeframe": "5m",
         "context_timeframe": "15m",
+        "context_note": "Use 15m for the wider chart structure; the automated event confirmation uses completed 5m candles.",
         "reason": "Wait for the 15-minute final review and 5-minute confirmation.",
     }
     direction = (analysis or {}).get("combined_direction", (analysis or {}).get("direction"))
@@ -306,13 +307,13 @@ def build_event_trade_plan(analysis, snapshot):
         stop = min(swing_low, signal_low, close - atr) - stop_buffer
         risk = entry - stop
         targets = [entry + risk * multiple for multiple in (1, 2, 3)]
-        trigger = f"Wait for a completed 1-minute candle to close above {entry:.6f}, then look for a hold/retest."
+        trigger = f"After release, wait for a completed 5-minute candle to confirm bullish direction. Then wait for a completed 1-minute candle to close above {entry:.6f} and hold/retest; do not chase if price has already run."
     else:
         entry = signal_low - buffer
         stop = max(swing_high, signal_high, close + atr) + stop_buffer
         risk = stop - entry
         targets = [entry - risk * multiple for multiple in (1, 2, 3)]
-        trigger = f"Wait for a completed 1-minute candle to close below {entry:.6f}, then look for a hold/retest."
+        trigger = f"After release, wait for a completed 5-minute candle to confirm bearish direction. Then wait for a completed 1-minute candle to close below {entry:.6f} and hold/retest; do not chase if price has already run."
     if risk <= 0:
         plan["reason"] = "The calculated stop is not on the protective side of entry; no trade."
         return plan
@@ -328,7 +329,7 @@ def build_event_trade_plan(analysis, snapshot):
         "risk_reward": "1R / 2R / 3R",
         "entry_condition": trigger,
         "invalidation": "Cancel the setup if the 5-minute direction loses EMA/ADX alignment or price invalidates the structural stop.",
-        "execution_note": "Use 1m for the entry only after 5m confirmation. If 1m is too noisy, wait for a 5m candle close. Never chase the first CPI/news spike. Levels use Twelve Data candles; confirm your broker's live quote, spread and tick size before acting.",
+        "execution_note": "15m is the wider chart context; the post-release 5m candle is the confirmation; 1m is the entry trigger. If 1m is too noisy, wait for a fresh 5m setup. Never chase the first CPI/news spike. Levels use Twelve Data candles; confirm your broker's live quote, spread and tick size before acting.",
         "source_timeframe": snapshot.get("timeframe"),
         "source_candle_time": snapshot.get("candle_time"),
         "reason": "Fundamental event-currency bias and completed-candle technical confirmation align.",
