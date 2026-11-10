@@ -35,8 +35,22 @@ class EconomicEventTests(unittest.TestCase):
         event = {"scheduled_at": (now + timedelta(minutes=4)).isoformat(), "checkpoints": {}}
         self.assertEqual(ee.due_checkpoints(event, now), ["5m"])
         event = {"scheduled_at": (now + timedelta(minutes=2)).isoformat(), "checkpoints": {}}
-        self.assertEqual(ee.due_checkpoints(event, now), [])
+        # The 5m reminder remains eligible until the event actually starts.
+        self.assertEqual(ee.due_checkpoints(event, now), ["5m"])
 
+    def test_15m_checkpoint_remains_due_until_5m_window_begins(self):
+        scheduled = datetime(2026, 11, 10, 14, 30, tzinfo=timezone.utc)
+        event = {"scheduled_at": scheduled.isoformat(), "checkpoints": {}}
+        # Normal 15-minute alert time and a delayed scheduler catch-up.
+        self.assertEqual(ee.due_checkpoints(event, scheduled - timedelta(minutes=15)), ["15m"])
+        self.assertEqual(ee.due_checkpoints(event, scheduled - timedelta(minutes=7)), ["15m"])
+        # At five minutes, only the separate verification checkpoint is due.
+        self.assertEqual(ee.due_checkpoints(event, scheduled - timedelta(minutes=5)), ["5m"])
+        # A completed checkpoint is never repeated.
+        event["checkpoints"]["15m"] = {"analysis": {"direction": "BULLISH"}}
+        self.assertEqual(ee.due_checkpoints(event, scheduled - timedelta(minutes=7)), [])
+        # Checkpoints are never sent at/after the scheduled release time.
+        self.assertEqual(ee.due_checkpoints(event, scheduled), [])
     def test_create_and_list_event(self):
         item = self.event(forecast="3.1", previous="3.2")
         self.assertEqual(ee.get_event(item["id"])["title"], "US CPI")

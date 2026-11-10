@@ -725,17 +725,26 @@ async def fetch_bea_events():
 
 
 def due_checkpoints(event, now=None):
+    """Return the active pre-event checkpoint, with catch-up until the next one.
+
+    Each reminder remains eligible throughout its own interval. This lets a
+    delayed scheduler still send the 15m review before the 5m verification
+    window begins, without sending a stale 15m reminder at the 5m checkpoint.
+    """
     now = _parse_dt(now or _now())
     scheduled = _parse_dt(event["scheduled_at"])
+    checkpoints = event.get("checkpoints", {}) or {}
     due = []
-    late_windows = {"24h": 30, "1h": 10, "15m": 5, "5m": 2}
-    for label, offset in CHECKPOINTS:
+    for index, (label, offset) in enumerate(CHECKPOINTS):
         target = scheduled - offset
-        window = timedelta(minutes=late_windows.get(label, 1))
-        if target <= now < min(target + window, scheduled) and label not in event.get("checkpoints", {}):
+        next_target = (
+            scheduled - CHECKPOINTS[index + 1][1]
+            if index + 1 < len(CHECKPOINTS)
+            else scheduled
+        )
+        if target <= now < next_target and label not in checkpoints:
             due.append(label)
     return due
-
 
 def render_event_chart(event, analysis):
     """Return a small event-specific evidence card suitable for Telegram photo delivery."""
@@ -748,6 +757,8 @@ def render_event_chart(event, analysis):
     ax.axis("off")
     ax.text(.04, .88, "FOREX HUNTER AI • ECONOMIC INTELLIGENCE",
             color="#D6AD45", fontsize=11, weight="bold", transform=ax.transAxes)
+    ax.text(.04, .77, "EVENT SUMMARY • LIVE MARKET CANDLES UNAVAILABLE",
+            color="#FF5263", fontsize=9, weight="bold", transform=ax.transAxes)
     ax.text(.04, .68, event["title"][:75], color="white", fontsize=19,
             weight="bold", transform=ax.transAxes)
     ax.text(.04, .47, f'{analysis["currency"]}  |  {analysis["direction"]}',

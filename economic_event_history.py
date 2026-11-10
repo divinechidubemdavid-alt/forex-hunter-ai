@@ -1,7 +1,7 @@
 """Persistent, transparent history and performance summaries for economic events.
 
-Scores only outcomes supported by recorded market-reaction snapshots. Missing evidence
-stays unscored; directional forecast accuracy is not presented as trade profitability.
+Scores only outcomes supported by saved market evidence. Directional accuracy is
+kept separate from hypothetical event-trade outcomes.
 """
 from __future__ import annotations
 
@@ -35,13 +35,99 @@ def event_conversation(event: dict) -> list[dict]:
     return sorted(rows, key=lambda row: str(row.get("at") or ""))
 
 
+def update_event_trade_progress(event: dict, snapshot: dict) -> dict:
+    """Update a saved conditional event setup from a completed OHLC candle.
+
+    Once any TP is reached, the trade is a WIN permanently. Later targets are
+    still tracked; a later retracement can never turn a TP1/TP2 win into a loss.
+    """
+    trade = event.get("event_trade") or {}
+    if trade.get("status") not in {"WAITING_ENTRY", "MONITORING", "WIN"} or snapshot.get("status") != "AVAILABLE":
+        return trade
+    candle_time = snapshot.get("candle_time")
+    if candle_time and candle_time == trade.get("last_candle_time"):
+        return trade
+    try:
+        high = float(snapshot["signal_candle_high"])
+        low = float(snapshot["signal_candle_low"])
+        stop = float(trade["stop_loss"])
+        targets = [float(value) for value in trade.get("take_profits", [])[:3]]
+        entry = float(trade["entry_trigger"])
+    except (KeyError, TypeError, ValueError):
+        return trade
+    side = str(trade.get("side", "")).upper()
+    hits = set(trade.get("hit_targets", []))
+    if trade.get("status") == "WAITING_ENTRY":
+        entry_hit = high >= entry if side == "BUY" else low <= entry if side == "SELL" else False
+        if entry_hit:
+            trade["status"] = "MONITORING"
+            trade["result"] = "PENDING"
+            trade["entered_at"] = candle_time
+            trade["entry_price"] = entry
+            trade["note"] = "Entry trigger reached; target/stop checks begin on the next completed candle."
+        trade["last_candle_time"] = candle_time
+        trade["last_checked_at"] = snapshot.get("retrieved_at")
+        event["event_trade"] = trade
+        return trade
+    if side == "BUY":
+        stop_hit = low <= stop
+        target_hits = [i + 1 for i, target in enumerate(targets) if high >= target]
+    elif side == "SELL":
+        stop_hit = high >= stop
+        target_hits = [i + 1 for i, target in enumerate(targets) if low <= target]
+    else:
+        return trade
+
+    # If one OHLC candle spans a stop and a new target, its intrabar sequence
+    # is unknowable. A prior TP win remains a win regardless of later reversal.
+    new_hits = [index for index in target_hits if index not in hits]
+    if stop_hit and new_hits and not hits:
+        trade["status"] = "AMBIGUOUS"
+        trade["result"] = "UNSCORED"
+        trade["note"] = "One candle touched both stop and target; intrabar order is unknown."
+    elif stop_hit and hits:
+        # A previous TP remains a win. The stop closes the remaining tracked
+        # position, so stop polling rather than pretending later targets remain open.
+        trade["status"] = "WIN"
+        trade["result"] = "WIN"
+        trade["exit_reason"] = "STOP_AFTER_TP"
+        trade["partial_win"] = True
+        trade["note"] = f'TP{min(hits)} remains a win; stop later closed the remaining position.'
+    elif stop_hit and new_hits:
+        trade["status"] = "AMBIGUOUS"
+        trade["result"] = "UNSCORED"
+        trade["note"] = "One candle touched both stop and target; intrabar order is unknown."
+    else:
+        hits.update(new_hits)
+        if hits:
+            trade["status"] = "WIN"
+            trade["result"] = "WIN"
+            trade["winning_targets"] = sorted(hits)
+            trade["first_target"] = min(hits)
+            trade["note"] = f'TP{min(hits)} reached; this trade remains a win.'
+        elif stop_hit:
+            trade["status"] = "LOSS"
+            trade["result"] = "LOSS"
+            trade["note"] = "Stop-loss reached before any take-profit."
+    trade["hit_targets"] = sorted(hits)
+    trade["last_candle_time"] = candle_time
+    trade["last_checked_at"] = snapshot.get("retrieved_at")
+    event["event_trade"] = trade
+    return trade
+
+
 def performance_summary(events: list[dict]) -> dict:
-    """Aggregate recorded event outcomes without inventing missing scores."""
+    """Aggregate event-level accuracy and trade tracking without inventing scores."""
     summary = {
-        "events": len(events), "bullish": 0, "bearish": 0, "no_clear_direction": 0, "not_finalized": 0,
-        "directional_scored": 0, "directional_correct": 0,
+        "events": len(events), "bullish": 0, "bearish": 0, "no_clear_direction": 0,
+        "not_finalized": 0, "directional_scored": 0, "directional_correct": 0,
         "trades_scored": 0, "trade_wins": 0, "trade_losses": 0,
-        "net_r": 0.0, "unscored": 0,
+        "tp1": 0, "tp2": 0, "tp3": 0, "partial_wins": 0,
+        "no_trade": 0, "monitoring": 0, "ambiguous": 0,
+        "buy_scored": 0, "buy_correct": 0, "buy_wins": 0, "buy_losses": 0,
+        "sell_scored": 0, "sell_correct": 0, "sell_wins": 0, "sell_losses": 0,
+        "confidence_total": 0, "confidence_count": 0, "net_r": 0.0, "unscored": 0,
+        "by_event_type": {},
     }
     for event in events:
         final = event.get("final_15m") or event.get("checkpoints", {}).get("15m") or {}
@@ -55,32 +141,97 @@ def performance_summary(events: list[dict]) -> dict:
             summary["bearish"] += 1
         else:
             summary["no_clear_direction"] += 1
+        if analysis.get("confidence") is not None:
+            try:
+                summary["confidence_total"] += float(analysis["confidence"])
+                summary["confidence_count"] += 1
+            except (TypeError, ValueError):
+                pass
+
+        title = str(event.get("title", "Other")).upper()
+        event_type = next((name for name in ("CPI", "NFP", "FOMC", "GDP", "UNEMPLOYMENT", "PCE")
+                           if name in title or (name == "NFP" and "PAYROLL" in title)), "OTHER")
+        bucket = summary["by_event_type"].setdefault(event_type, {
+            "events": 0, "directional_scored": 0, "directional_correct": 0,
+            "trades_scored": 0, "trade_wins": 0, "trade_losses": 0,
+        })
+        bucket["events"] += 1
 
         report = event.get("post_event_report") or {}
-        reactions = [
-            item for item in report.get("market_reactions", [])
-            if item.get("direction") in {"BULLISH", "BEARISH"}
-        ]
+        reactions = [item for item in report.get("market_reactions", [])
+                     if item.get("direction") in {"BULLISH", "BEARISH"}]
+        correct = None
         if direction in {"BULLISH", "BEARISH"} and reactions:
+            correct = reactions[-1]["direction"] == direction
             summary["directional_scored"] += 1
-            # Score the latest recorded reaction, not every sample as a separate event.
-            if reactions[-1]["direction"] == direction:
+            bucket["directional_scored"] += 1
+            if correct:
                 summary["directional_correct"] += 1
+                bucket["directional_correct"] += 1
         else:
             summary["unscored"] += 1
 
-        trade = event.get("trade_outcome") or report.get("trade_outcome")
-        if isinstance(trade, dict) and trade.get("result") in {"WIN", "LOSS"}:
+        plan = (event.get("checkpoints", {}).get("5m") or {}).get("trade_plan") or final.get("trade_plan") or {}
+        trade = event.get("event_trade") or event.get("trade_outcome") or report.get("trade_outcome") or {}
+        side = str(trade.get("side") or plan.get("side") or "").upper()
+        if plan.get("status") == "NO_TRADE" and not trade:
+            summary["no_trade"] += 1
+        status = str(trade.get("status", trade.get("result", ""))).upper()
+        if status == "MONITORING":
+            summary["monitoring"] += 1
+        if status == "AMBIGUOUS":
+            summary["ambiguous"] += 1
+        if status in {"WIN", "LOSS"}:
             summary["trades_scored"] += 1
-            summary["trade_wins" if trade["result"] == "WIN" else "trade_losses"] += 1
+            bucket["trades_scored"] += 1
+            if status == "WIN":
+                summary["trade_wins"] += 1
+                bucket["trade_wins"] += 1
+            else:
+                summary["trade_losses"] += 1
+                bucket["trade_losses"] += 1
+            hits = set(trade.get("hit_targets", trade.get("winning_targets", [])))
+            for tp in (1, 2, 3):
+                if tp in hits:
+                    summary[f"tp{tp}"] += 1
+            if status == "WIN" and hits and max(hits) < 3:
+                summary["partial_wins"] += 1
+            if side == "BUY":
+                summary["buy_wins" if status == "WIN" else "buy_losses"] += 1
+            elif side == "SELL":
+                summary["sell_wins" if status == "WIN" else "sell_losses"] += 1
             try:
                 summary["net_r"] += float(trade.get("r_multiple", 0))
             except (TypeError, ValueError):
                 pass
+        if correct is not None and side in {"BUY", "SELL"}:
+            summary[f"{side.lower()}_scored"] += 1
+            if correct:
+                summary[f"{side.lower()}_correct"] += 1
 
     summary["directional_accuracy_pct"] = (
         round(100 * summary["directional_correct"] / summary["directional_scored"], 1)
         if summary["directional_scored"] else None
     )
+    summary["trade_win_rate_pct"] = (
+        round(100 * summary["trade_wins"] / summary["trades_scored"], 1)
+        if summary["trades_scored"] else None
+    )
+    summary["buy_accuracy_pct"] = (
+        round(100 * summary["buy_correct"] / summary["buy_scored"], 1)
+        if summary["buy_scored"] else None
+    )
+    summary["sell_accuracy_pct"] = (
+        round(100 * summary["sell_correct"] / summary["sell_scored"], 1)
+        if summary["sell_scored"] else None
+    )
+    summary["average_confidence"] = (
+        round(summary["confidence_total"] / summary["confidence_count"], 1)
+        if summary["confidence_count"] else None
+    )
+    buy_trades = summary["buy_wins"] + summary["buy_losses"]
+    sell_trades = summary["sell_wins"] + summary["sell_losses"]
+    summary["buy_trade_win_rate_pct"] = round(100 * summary["buy_wins"] / buy_trades, 1) if buy_trades else None
+    summary["sell_trade_win_rate_pct"] = round(100 * summary["sell_wins"] / sell_trades, 1) if sell_trades else None
     summary["net_r"] = round(summary["net_r"], 2)
     return summary
