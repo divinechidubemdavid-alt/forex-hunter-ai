@@ -67,6 +67,12 @@ def _event_text(event):
     when = ee._parse_dt(event["scheduled_at"]).astimezone(WAT)
     forecast = event.get("forecast")
     forecast_label = event.get("forecast_type", "market consensus" if forecast is not None else "not supplied")
+    is_past = ee._parse_dt(event["scheduled_at"]) <= datetime.now(timezone.utc)
+    status = event.get("status", "scheduled").upper()
+    if is_past and not event.get("post_event_report"):
+        status = "AWAITING OUTCOME / EVALUATION PENDING"
+    elif is_past and event.get("post_event_report") and not event.get("event_trade"):
+        status = "RELEASED — TRADE RESULT MAY BE UNAVAILABLE"
     return (
         f'🗓 {event["title"]}\n'
         f'Currency: {event.get("currency", "USD")} | Impact: {event.get("impact", "high").upper()}\n'
@@ -74,7 +80,7 @@ def _event_text(event):
         f'Forecast ({forecast_label}): {forecast if forecast is not None else "Not supplied"} | '
         f'Previous: {event.get("previous") or "Not supplied"}\n'
         f'Source: {event.get("provider_source", event.get("source", "unknown"))}\n'
-        f'Status: {event.get("status", "scheduled").upper()}'
+        f'Status: {status}'
     )
 
 
