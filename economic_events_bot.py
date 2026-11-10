@@ -102,7 +102,8 @@ async def _event_artwork_photo(event):
 async def _send_event_artwork(chat, event, caption=None):
     """Deliver and persist the event's original artwork identity."""
     photo = await _event_artwork_photo(event)
-    sent = await chat.send_photo(
+    sender = getattr(chat, "send_photo", None) or getattr(chat, "reply_photo")
+    sent = await sender(
         photo=photo,
         caption=(caption or f'🎨 EVENT ARTWORK — {event.get("title", "Economic event")}'),
     )
