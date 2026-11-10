@@ -244,6 +244,98 @@ def directional_analysis(event, technical=None, phase="pre-event"):
     }
 
 
+
+def build_event_trade_plan(analysis, snapshot):
+    """Build a conditional event-trade plan from completed-candle evidence only.
+
+    The plan is educational decision support, not an order or a prediction.
+    A 1-minute entry is permitted only after 5-minute confirmation.
+    """
+    plan = {
+        "status": "NO_TRADE",
+        "execution_timeframe": "1m",
+        "alternative_execution_timeframe": "5m",
+        "confirmation_timeframe": "5m",
+        "context_timeframe": "15m",
+        "context_note": "Use 15m for the wider chart structure; the automated event confirmation uses completed 5m candles.",
+        "reason": "Wait for the 15-minute final review and 5-minute confirmation.",
+    }
+    direction = (analysis or {}).get("combined_direction", (analysis or {}).get("direction"))
+    if direction not in {"BULLISH", "BEARISH"}:
+        plan["reason"] = "No clear fundamental direction; do not trade this event."
+        return plan
+    fundamental_direction = (analysis or {}).get("fundamental_direction")
+    if fundamental_direction not in {"BULLISH", "BEARISH"}:
+        plan["reason"] = "Fundamental event evidence is insufficient; technical-only bias is not enough for an event trade."
+        return plan
+    if (analysis or {}).get("confidence", 0) < 40:
+        plan["reason"] = "Event-direction confidence is too low for a trade plan."
+        return plan
+    if not isinstance(snapshot, dict) or snapshot.get("status") != "AVAILABLE":
+        plan["reason"] = "Fresh completed-candle technical data is unavailable; no entry plan."
+        return plan
+    if snapshot.get("currency_direction") != direction:
+        plan["reason"] = "Fundamental and technical event-currency directions do not align; wait."
+        return plan
+    pair_direction = snapshot.get("direction")
+    if pair_direction not in {"BULLISH", "BEARISH"}:
+        plan["reason"] = "The selected market has no clear technical direction; no entry."
+        return plan
+    try:
+        adx = float(snapshot.get("adx"))
+        atr = float(snapshot.get("atr"))
+        close = float(snapshot.get("close"))
+        signal_high = float(snapshot.get("signal_candle_high"))
+        signal_low = float(snapshot.get("signal_candle_low"))
+        swing_high = float(snapshot.get("swing_high"))
+        swing_low = float(snapshot.get("swing_low"))
+    except (TypeError, ValueError):
+        plan["reason"] = "Required ATR and completed-candle structure are unavailable."
+        return plan
+    if adx < 20 or not snapshot.get("ema_aligned"):
+        plan["reason"] = "ADX/EMA confirmation is too weak; no trade until the 5-minute trend aligns."
+        return plan
+    if atr <= 0 or close <= 0 or signal_high <= signal_low:
+        plan["reason"] = "Invalid volatility or candle data; no safe levels can be calculated."
+        return plan
+
+    market_side = "BUY" if pair_direction == "BULLISH" else "SELL"
+    buffer = atr * 0.05
+    stop_buffer = atr * 0.10
+    if market_side == "BUY":
+        entry = signal_high + buffer
+        stop = min(swing_low, signal_low, close - atr) - stop_buffer
+        risk = entry - stop
+        targets = [entry + risk * multiple for multiple in (1, 2, 3)]
+        trigger = f"After release, wait for a completed 5-minute candle to confirm bullish direction. Then wait for a completed 1-minute candle to close above {entry:.6f} and hold/retest; do not chase if price has already run."
+    else:
+        entry = signal_low - buffer
+        stop = max(swing_high, signal_high, close + atr) + stop_buffer
+        risk = stop - entry
+        targets = [entry - risk * multiple for multiple in (1, 2, 3)]
+        trigger = f"After release, wait for a completed 5-minute candle to confirm bearish direction. Then wait for a completed 1-minute candle to close below {entry:.6f} and hold/retest; do not chase if price has already run."
+    if risk <= 0:
+        plan["reason"] = "The calculated stop is not on the protective side of entry; no trade."
+        return plan
+
+    plan.update({
+        "status": "CONDITIONAL_SETUP",
+        "market": snapshot.get("market"),
+        "side": market_side,
+        "entry_trigger": round(entry, 6),
+        "stop_loss": round(stop, 6),
+        "risk_distance": round(risk, 6),
+        "take_profits": [round(value, 6) for value in targets],
+        "risk_reward": "1R / 2R / 3R",
+        "entry_condition": trigger,
+        "invalidation": "Cancel the setup if the 5-minute direction loses EMA/ADX alignment or price invalidates the structural stop.",
+        "execution_note": "15m is the wider chart context; the post-release 5m candle is the confirmation; 1m is the entry trigger. If 1m is too noisy, wait for a fresh 5m setup. Never chase the first CPI/news spike. Levels use Twelve Data candles; confirm your broker's live quote, spread and tick size before acting.",
+        "source_timeframe": snapshot.get("timeframe"),
+        "source_candle_time": snapshot.get("candle_time"),
+        "reason": "Fundamental event-currency bias and completed-candle technical confirmation align.",
+    })
+    return plan
+
 def _event_evidence(event):
     return {
         "title": event.get("title"),

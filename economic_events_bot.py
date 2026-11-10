@@ -251,9 +251,29 @@ async def handle_event_callback(update, context):
             + ("\n\n10Y YIELDS:\n" + yields_text if yields_text else "")
             + ("\n\nPost-release report: available." if report else "\n\nPost-release report: awaiting official actual data.")
         )
+        latest_checkpoint = checkpoints.get("5m") or checkpoints.get("15m") or {}
+        history_plan = latest_checkpoint.get("trade_plan") or {}
+        caption += (
+            "\n\nTRADE TIMEFRAME: "
+            f'{history_plan.get("execution_timeframe", "1m")} entry / '
+            f'{history_plan.get("confirmation_timeframe", "5m")} confirmation / '
+            f'{history_plan.get("context_timeframe", "15m")} context'
+            f'\n{history_plan.get("context_note", "15m is wider chart context; automated confirmation uses 5m.")}'
+            f'\nTRADE PLAN: {history_plan.get("status", "NOT YET AVAILABLE")} — '
+            f'{history_plan.get("reason", "Await the final review.")}'
+        )
+        if history_plan.get("status") == "CONDITIONAL_SETUP":
+            targets = history_plan.get("take_profits", [])
+            caption += (
+                f'\n{history_plan.get("side")} {history_plan.get("market")} '
+                f'Entry {history_plan.get("entry_trigger")} | SL {history_plan.get("stop_loss")}'
+                f' | TP1 {targets[0]} | TP2 {targets[1]} | TP3 {targets[2]}'
+            )
         saved_chart = (event.get("chart_images") or [])
         photo = saved_chart[-1].get("file_id") if saved_chart else ee.render_event_chart(event, analysis)
         sent_chart = await query.message.reply_photo(photo=photo, caption=caption[:1020])
+        if len(caption) > 1020:
+            await query.message.reply_text(caption[1020:4096])
         if sent_chart.photo:
             event.setdefault("chart_images", []).append({
                 "file_id": sent_chart.photo[-1].file_id,
@@ -453,6 +473,26 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         + ("\n\nLATEST ECONOMIC NEWS:\n" + news_lines if news_lines else "")
         + ("\n\n10Y GOVERNMENT BOND YIELDS:\n" + yield_lines if yield_lines else "")
     )
+    trade_plan = record.get("trade_plan") or {}
+    text += (
+        "\n\nTRADE TIMEFRAME & ENTRY PLAN:"
+        f"\nDirection: {trade_plan.get('side', 'NO TRADE')} | Status: {trade_plan.get('status', 'NO_TRADE')}"
+        f"\nExecution: {trade_plan.get('execution_timeframe', '1m')} | "
+        f"Confirmation: {trade_plan.get('confirmation_timeframe', '5m')} | "
+        f"Context: {trade_plan.get('context_timeframe', '15m')}"
+        f"\n{trade_plan.get('context_note', 'Use 15m for wider structure; automated confirmation is 5m.')}"
+        f"\nReason: {trade_plan.get('reason', 'Await the final 15m review.')}"
+    )
+    if trade_plan.get("status") == "CONDITIONAL_SETUP":
+        targets = trade_plan.get("take_profits", [])
+        text += (
+            f"\nMarket: {trade_plan.get('market')} | Entry trigger: {trade_plan.get('entry_trigger')}"
+            f"\nStop-loss: {trade_plan.get('stop_loss')} | "
+            f"TP1: {targets[0]} | TP2: {targets[1]} | TP3: {targets[2]}"
+            f"\nEntry rule: {trade_plan.get('entry_condition')}"
+            f"\nInvalidation: {trade_plan.get('invalidation')}"
+            f"\n{trade_plan.get('execution_note')}"
+        )
     if checkpoint == "5m":
         if record.get("verification") == "CONFIRMED_UNCHANGED":
             text += "\n\n15-MINUTE FORECAST CONFIRMED — UNCHANGED."
@@ -473,6 +513,8 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
             if hasattr(photo, "seek"):
                 photo.seek(0)
             sent = await application.bot.send_photo(chat_id=int(user_id), photo=photo, caption=text[:1020])
+            if len(text) > 1020:
+                await application.bot.send_message(chat_id=int(user_id), text=text[1020:4096])
             if sent.photo:
                 latest = ee.get_event(event["id"]) or event
                 latest.setdefault("chart_images", []).append({
@@ -585,6 +627,21 @@ async def economic_events_loop(application):
                         technical_snapshot=snapshot,
                         evidence_note=snapshot.get("reason", ""),
                     )
+                    if checkpoint in {"15m", "5m"}:
+                        if checkpoint == "5m" and record.get("verification") == "NO_15M_BASELINE":
+                            record["trade_plan"] = {
+                                "status": "NO_TRADE", "execution_timeframe": "1m",
+                                "alternative_execution_timeframe": "5m",
+                                "confirmation_timeframe": "5m", "context_timeframe": "15m",
+                                "reason": "No saved 15-minute final review; the 5-minute check cannot create an independent event trade plan.",
+                            }
+                        else:
+                            record["trade_plan"] = ee.build_event_trade_plan(record["analysis"], snapshot)
+                        saved_event = ee.get_event(event["id"]) or event
+                        saved_event.setdefault("checkpoints", {})[checkpoint] = record
+                        if saved_event.get("history"):
+                            saved_event["history"][-1] = record
+                        ee.save_event(saved_event)
                     await _send_event_alert(application, event, checkpoint, record, market_chart)
         except Exception:
             log.exception("Economic event scheduler iteration failed")
