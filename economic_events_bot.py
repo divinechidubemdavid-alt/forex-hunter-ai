@@ -181,17 +181,17 @@ async def handle_event_callback(update, context):
         stats = event_history.performance_summary(rows)
         accuracy = (f'{stats["directional_accuracy_pct"]}%' if stats["directional_accuracy_pct"] is not None else "Not enough scored outcomes yet")
         await query.message.reply_text(
-            "📈 ECONOMIC EVENT PERFORMANCE\\n\\n"
-            f'Events recorded: {stats["events"]}\\n'
-            f'15-minute bullish forecasts: {stats["bullish"]}\\n'
-            f'15-minute bearish forecasts: {stats["bearish"]}\\n'
-            f'No clear direction / other: {stats["no_clear_direction"]}\\n'
-            f'Not yet finalized: {stats["not_finalized"]}\\n'
-            f'Directional accuracy: {accuracy} ({stats["directional_correct"]}/{stats["directional_scored"]} scored events)\\n'
-            f'Trade outcomes recorded: {stats["trades_scored"]}\\n'
-            f'Trade wins/losses: {stats["trade_wins"]}/{stats["trade_losses"]}\\n'
-            f'Net recorded performance: {stats["net_r"]:+.2f}R\\n'
-            f'Unscored events: {stats["unscored"]}\\n\\n'
+            "📈 ECONOMIC EVENT PERFORMANCE\n\n"
+            f'Events recorded: {stats["events"]}\n'
+            f'15-minute bullish forecasts: {stats["bullish"]}\n'
+            f'15-minute bearish forecasts: {stats["bearish"]}\n'
+            f'No clear direction / other: {stats["no_clear_direction"]}\n'
+            f'Not yet finalized: {stats["not_finalized"]}\n'
+            f'Directional accuracy: {accuracy} ({stats["directional_correct"]}/{stats["directional_scored"]} scored events)\n'
+            f'Trade outcomes recorded: {stats["trades_scored"]}\n'
+            f'Trade wins/losses: {stats["trade_wins"]}/{stats["trade_losses"]}\n'
+            f'Net recorded performance: {stats["net_r"]:+.2f}R\n'
+            f'Unscored events: {stats["unscored"]}\n\n'
             "Accuracy uses recorded post-release market reactions. Missing evidence is never counted as a win or loss. Event chart images follow below."
         )
         # Show each event's own saved market chart (or clearly labelled event
@@ -206,8 +206,8 @@ async def handle_event_callback(update, context):
             direction = analysis.get("combined_direction", analysis.get("direction", "UNSCORED"))
             photo, chart_meta = await _event_chart_photo(item, refresh_market=False)
             caption = (
-                f'📊 {item.get("title", "Economic event")}\\n'
-                f'Market direction: {direction} | Confidence: {analysis.get("confidence", "N/A")}/100\\n'
+                f'📊 {item.get("title", "Economic event")}\n'
+                f'Market direction: {direction} | Confidence: {analysis.get("confidence", "N/A")}/100\n'
                 f'Chart: {chart_meta.get("market", "Event summary")} '
                 f'{chart_meta.get("timeframe", "")} [{chart_meta.get("chart_type", "event_summary")}]'
             )
