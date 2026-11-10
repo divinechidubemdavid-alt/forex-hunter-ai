@@ -748,6 +748,8 @@ def render_event_chart(event, analysis):
     ax.axis("off")
     ax.text(.04, .88, "FOREX HUNTER AI • ECONOMIC INTELLIGENCE",
             color="#D6AD45", fontsize=11, weight="bold", transform=ax.transAxes)
+    ax.text(.04, .77, "EVENT SUMMARY • LIVE MARKET CANDLES UNAVAILABLE",
+            color="#FF5263", fontsize=9, weight="bold", transform=ax.transAxes)
     ax.text(.04, .68, event["title"][:75], color="white", fontsize=19,
             weight="bold", transform=ax.transAxes)
     ax.text(.04, .47, f'{analysis["currency"]}  |  {analysis["direction"]}',
