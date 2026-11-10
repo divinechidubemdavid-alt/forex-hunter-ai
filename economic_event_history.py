@@ -168,7 +168,7 @@ def performance_summary(events: list[dict]) -> dict:
         plan = (event.get("checkpoints", {}).get("5m") or {}).get("trade_plan") or final.get("trade_plan") or {}
         trade = event.get("event_trade") or event.get("trade_outcome") or report.get("trade_outcome") or {}
         side = str(trade.get("side") or plan.get("side") or "").upper()
-        if plan.get("status") != "CONDITIONAL_SETUP" and not trade:
+        if plan.get("status") == "NO_TRADE" and not trade:
             summary["no_trade"] += 1
         status = str(trade.get("status", trade.get("result", ""))).upper()
         if status == "MONITORING":
