@@ -728,7 +728,10 @@ def due_checkpoints(event, now=None):
     now = _parse_dt(now or _now())
     scheduled = _parse_dt(event["scheduled_at"])
     due = []
-    late_windows = {"24h": 30, "1h": 10, "15m": 5, "5m": 2}
+    # Wide catch-up windows make alerts resilient to calendar/API delays and
+    # short host restarts. The 15m window intentionally overlaps the 5m
+    # window: CHECKPOINTS ordering guarantees the 15m baseline is saved first.
+    late_windows = {"24h": 60, "1h": 30, "15m": 15, "5m": 5}
     for label, offset in CHECKPOINTS:
         target = scheduled - offset
         window = timedelta(minutes=late_windows.get(label, 1))
