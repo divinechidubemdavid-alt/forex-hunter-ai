@@ -376,7 +376,12 @@ async def _check_one_price(app, user_id, signal, quote):
         return
 
     flags = [bool(signal.get(f"tp{i}_hit")) for i in (1, 2, 3)]
-    # Only compare two actual stream observations; a candle close from the\n    # slower fallback monitor is not a reliable previous tick.\n    previous_price = (\n        _number(signal.get("current_price")) if previous_tick is not None else None\n    )\n
+    # Only compare two actual stream observations; a candle close from the
+    # slower fallback monitor is not a reliable previous tick.
+    previous_price = (
+        _number(signal.get("current_price")) if previous_tick is not None else None
+    )
+
     if direction == "BUY":
         stop_hit = price <= stop
         target_hits = [price >= target for target in targets]
