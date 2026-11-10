@@ -99,6 +99,23 @@ async def _event_artwork_photo(event):
     return event_visuals.render_event_artwork(event)
 
 
+async def _send_event_artwork(chat, event, caption=None):
+    """Deliver and persist the event's original artwork identity."""
+    photo = await _event_artwork_photo(event)
+    sent = await chat.send_photo(
+        photo=photo,
+        caption=(caption or f'🎨 EVENT ARTWORK — {event.get("title", "Economic event")}'),
+    )
+    if sent.photo and not (event.get("event_artwork") or {}).get("file_id"):
+        event["event_artwork"] = {
+            "file_id": sent.photo[-1].file_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "kind": "event_artwork",
+        }
+        ee.save_event(event)
+    return sent
+
+
 async def _show_list(chat, include_past, user_id):
     # Display sections are mutually exclusive at the exact scheduled release time.
     now = datetime.now(timezone.utc)
@@ -325,6 +342,11 @@ async def handle_event_callback(update, context):
                 )
                 + "\n" + "\n".join("• " + x for x in analysis["reasons"])
             )
+            await _send_event_artwork(
+                query.message,
+                event,
+                caption=f'🎨 {event["title"]} — original event artwork (retained in history)',
+            )
             sent_chart = await query.message.reply_photo(photo=photo, caption=caption[:1020])
             if sent_chart.photo:
                 event.setdefault("chart_images", []).append({
@@ -391,6 +413,11 @@ async def handle_event_callback(update, context):
                 f'Entry {history_plan.get("entry_trigger")} | SL {history_plan.get("stop_loss")}'
                 f' | TP1 {targets[0]} | TP2 {targets[1]} | TP3 {targets[2]}'
             )
+        await _send_event_artwork(
+            query.message,
+            event,
+            caption=f'🎨 {event["title"]} — event identity artwork',
+        )
         photo, chart_meta = await _event_chart_photo(event, refresh_market=True)
         sent_chart = await query.message.reply_photo(photo=photo, caption=caption[:1020])
         if len(caption) > 1020:
