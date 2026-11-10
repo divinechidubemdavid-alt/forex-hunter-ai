@@ -98,7 +98,7 @@ class LivePriceMilestoneTests(unittest.IsolatedAsyncioTestCase):
             object(), "user", signal,
             {"price": 1988, "bid": 1987.5, "ask": 1989.5, "timestamp": 1794304863},
         )
-        self.assertTrue(signal["tp1_hit"])
+        self.assertTrue(self.updates[-1]["tp1_hit"])
 
     async def test_out_of_order_quote_is_ignored(self):
         await signal_monitor._check_one_price(
