@@ -225,7 +225,8 @@ def classify_gold_market(frame, timeframe, previous_state=None):
                 and abs(float(last["high"]) - resistance_line) <= atr * 0.35
             )
             bullish_pullback = (
-                ema9 > ema21
+                adx >= 18
+                and ema9 > ema21
                 and (
                     float(last["low"]) <= ema21 + atr * 0.25
                     or near_rising_support
@@ -236,7 +237,8 @@ def classify_gold_market(frame, timeframe, previous_state=None):
                     > _safe_float(previous.get("ema21"), 0.0)
             )
             bearish_pullback = (
-                ema9 < ema21
+                adx >= 18
+                and ema9 < ema21
                 and (
                     float(last["high"]) >= ema21 - atr * 0.25
                     or near_falling_resistance
