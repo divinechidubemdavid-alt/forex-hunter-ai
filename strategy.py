@@ -1036,6 +1036,8 @@ def analyze(frame, timeframe="15m", trading_style=None):
     if not style_has_trade_levels(trading_style):
         # Scalping deliberately has no Stop Loss or TP1/TP2/TP3 fields.
         # Its tracked management uses completed-candle reversal warnings.
+        for field in ("stop_loss", "take_profits", "risk_distance", "risk_reward"):
+            result.pop(field, None)
         result.update({
             "status": direction,
             "signal_stage": (
