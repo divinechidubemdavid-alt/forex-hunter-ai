@@ -545,71 +545,53 @@ def _early_watch_setup(data):
 
     return None
 
-def _early_entry_score(last, previous, direction, setup_name):
-    """Score early-entry evidence; ADX is supporting evidence, not a gate."""
-    score = 25
+def _early_entry_score(last, previous, direction, setup_name, trading_style="DAY"):
+    """Score early-entry evidence with the selected style's priorities."""
+    weights = style_score_profile(trading_style)
+    score = weights["setup"]
     reasons = [f"Early Trend Entry: {setup_name.replace('_', ' ').title()}"]
-
     if _candle_confirmation(last, direction):
-        score += 15
+        score += weights["candle"]
         reasons.append("Strong closed-candle rejection/confirmation")
-
     rsi = _safe_float(last.get("rsi"), 50.0)
     previous_rsi = _safe_float(previous.get("rsi"), 50.0)
     if direction == "BUY" and rsi > previous_rsi and 40 <= rsi <= 68:
-        score += 15
+        score += weights["rsi"]
         reasons.append("Bullish RSI momentum is turning upward")
     elif direction == "SELL" and rsi < previous_rsi and 32 <= rsi <= 60:
-        score += 15
+        score += weights["rsi"]
         reasons.append("Bearish RSI momentum is turning downward")
-
     plus_di = _safe_float(last.get("plus_di"))
     minus_di = _safe_float(last.get("minus_di"))
     previous_plus_di = _safe_float(previous.get("plus_di"))
     previous_minus_di = _safe_float(previous.get("minus_di"))
-    if direction == "BUY" and (
-        plus_di > minus_di or
-        (plus_di > previous_plus_di and minus_di < previous_minus_di)
-    ):
-        score += 15
+    if direction == "BUY" and (plus_di > minus_di or (plus_di > previous_plus_di and minus_di < previous_minus_di)):
+        score += weights["directional"]
         reasons.append("Bullish directional movement is improving")
-    elif direction == "SELL" and (
-        minus_di > plus_di or
-        (minus_di > previous_minus_di and plus_di < previous_plus_di)
-    ):
-        score += 15
+    elif direction == "SELL" and (minus_di > plus_di or (minus_di > previous_minus_di and plus_di < previous_plus_di)):
+        score += weights["directional"]
         reasons.append("Bearish directional movement is improving")
-
     ema9 = _safe_float(last.get("ema9"))
     ema21 = _safe_float(last.get("ema21"))
     previous_ema9 = _safe_float(previous.get("ema9"))
     previous_ema21 = _safe_float(previous.get("ema21"))
-    if direction == "BUY" and (
-        ema9 >= ema21 or
-        (ema9 >= previous_ema9 and ema21 >= previous_ema21)
-    ):
-        score += 10
+    if direction == "BUY" and (ema9 >= ema21 or (ema9 >= previous_ema9 and ema21 >= previous_ema21)):
+        score += weights["ema"]
         reasons.append("Bullish EMA structure or slope")
-    elif direction == "SELL" and (
-        ema9 <= ema21 or
-        (ema9 <= previous_ema9 and ema21 <= previous_ema21)
-    ):
-        score += 10
+    elif direction == "SELL" and (ema9 <= ema21 or (ema9 <= previous_ema9 and ema21 <= previous_ema21)):
+        score += weights["ema"]
         reasons.append("Bearish EMA structure or slope")
-
     adx = _safe_float(last.get("adx"))
     previous_adx = _safe_float(previous.get("adx"))
     if adx >= 15 or adx > previous_adx:
-        score += 10
+        score += weights["adx"]
         reasons.append("ADX strength is adequate or improving")
-
     atr = _safe_float(last.get("atr"))
     close = abs(_safe_float(last.get("close")))
     if atr > 0 and close > 0:
-        score += 5
+        score += weights["volatility"]
         reasons.append("Usable ATR volatility")
-
-    return min(score, MAXIMUM_SCORE), reasons
+    return min(round(score), MAXIMUM_SCORE), reasons
 
 
 def _move_is_extended(last, direction):
@@ -936,7 +918,7 @@ def analyze(frame, timeframe="15m", trading_style=None):
     if primary_strategy == "EARLY_TREND_ENTRY":
         strategy = labels[primary_strategy]
         score, reasons = _early_entry_score(
-            last, previous, direction, early_setup
+            last, previous, direction, early_setup, trading_style
         )
     else:
         strategy = labels[primary_strategy]
