@@ -688,7 +688,7 @@ async def _check_trend_warning(app, user_id, signal, frame):
             f"Signal #{signal_id} | {timeframe.upper()}\n"
             f"Latest closed-candle price: {latest:g}\n"
             f"{warning['message']}\n\n"
-            "Chart shows the latest completed candles and saved trade levels. "
+            "Chart shows the latest completed candles and the applicable style information. "
             "This is a warning, not a confirmed reversal."
         )[:950]
         await app.bot.send_photo(chat_id=int(user_id), photo=chart, caption=caption)
@@ -737,7 +737,7 @@ async def _refresh_saved_chart(app, user_id, signal, frame):
                 if str(signal.get("trading_style", "")).upper() != "SCALPING"
                 else "Management: completed-candle reversal / invalidation monitoring\n"
             )
-            f"Status: {signal.get('status', 'TRACKING')}\n"
+            + f"Status: {signal.get('status', 'TRACKING')}\n"
             "Updated from completed candles. Not a tick-by-tick live feed."
         )[:950]
         keyboard = InlineKeyboardMarkup([
