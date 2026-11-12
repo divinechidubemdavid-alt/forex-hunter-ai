@@ -184,7 +184,11 @@ def create_market_chart(
 
     title = f"{symbol}  |  {timeframe.upper()}"
     if trading_style:
-        title += f"  |  {style_label(trading_style)}"
+        try:
+            label = style_label(trading_style)
+        except ValueError:
+            label = str(trading_style)
+        title += f"  |  {label}"
     if strategy:
         title += f"  |  {str(strategy).upper()}"
     if signal_stage:
