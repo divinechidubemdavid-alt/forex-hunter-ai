@@ -107,6 +107,49 @@ class AccountManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             calculate_position_size(5000, 6, 2.5, 10)
 
+    def test_personal_profile_does_not_retain_prop_firm_name(self):
+        profile = create_profile("123", {
+            "name": "Personal",
+            "account_type": "PERSONAL",
+            "firm_name": "Should not be stored",
+            "starting_balance": 1000,
+            "currency": "USD",
+            "rules": {"daily_loss_percent": 2},
+        })
+        self.assertEqual(profile["firm_name"], "")
+
+    def test_position_count_splits_total_risk_and_lots(self):
+        trade = {
+            "status": "BUY",
+            "symbol": "EUR/USD",
+            "timeframe": "15m",
+            "entry": 1.1000,
+            "stop_loss": 1.0950,
+            "take_profits": [1.1050, 1.1100, 1.1150],
+        }
+        plan = calculate_account_trade_plan(self.profile, trade, 1, 10000, positions_count=4)
+        self.assertEqual(plan["positions_count"], 4)
+        self.assertAlmostEqual(plan["risk_amount"], 50)
+        self.assertAlmostEqual(plan["per_position_risk_amount"], 12.5)
+        self.assertAlmostEqual(plan["lots"], 1)
+        self.assertAlmostEqual(plan["per_position_lots"], 0.25)
+        self.assertEqual(plan["stop_loss"], trade["stop_loss"])
+        self.assertEqual(plan["take_profits"], trade["take_profits"])
+
+    def test_position_count_must_be_whole_number_between_one_and_twenty(self):
+        trade = {
+            "status": "BUY",
+            "symbol": "EUR/USD",
+            "timeframe": "15m",
+            "entry": 1.1000,
+            "stop_loss": 1.0950,
+            "take_profits": [1.1050, 1.1100, 1.1150],
+        }
+        for count in (0, 21, 1.5, "many", True):
+            with self.subTest(count=count):
+                with self.assertRaises(ValueError):
+                    calculate_account_trade_plan(self.profile, trade, 1, 10000, positions_count=count)
+
     def test_invalid_drawdown_model_is_rejected(self):
         with self.assertRaises(ValueError):
             create_profile("123", {
