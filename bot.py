@@ -908,7 +908,9 @@ async def analyse_market(update, context, symbol, timeframe, trading_style="DAY"
     try:
         frame = await fetch_candles(
             MARKETS[symbol],
-            outputsize=1500,
+            # One-hour Swing analysis needs enough history to build reliable
+            # completed Daily confirmation candles without another API call.
+            outputsize=3000 if timeframe == "1h" else 1500,
             interval=timeframe,
         )
 
