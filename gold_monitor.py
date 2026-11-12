@@ -200,9 +200,27 @@ def classify_gold_market(frame, timeframe, previous_state=None):
             }
         else:
             near_ema = abs(close - ema21) <= atr * 0.35
+            position = len(data) - 1
+            support_points = _swing_points(data.iloc[:-1], "low", "low")
+            resistance_points = _swing_points(data.iloc[:-1], "high", "high")
+            support_line, support_slope = _line_value(support_points, position)
+            resistance_line, resistance_slope = _line_value(resistance_points, position)
+            near_rising_support = (
+                support_line is not None
+                and support_slope > 0
+                and abs(float(last["low"]) - support_line) <= atr * 0.35
+            )
+            near_falling_resistance = (
+                resistance_line is not None
+                and resistance_slope < 0
+                and abs(float(last["high"]) - resistance_line) <= atr * 0.35
+            )
             bullish_pullback = (
                 ema9 > ema21
-                and float(last["low"]) <= ema21 + atr * 0.25
+                and (
+                    float(last["low"]) <= ema21 + atr * 0.25
+                    or near_rising_support
+                )
                 and close > ema9
                 and close > float(last["open"])
                 and _safe_float(previous.get("ema9"), 0.0)
@@ -210,7 +228,10 @@ def classify_gold_market(frame, timeframe, previous_state=None):
             )
             bearish_pullback = (
                 ema9 < ema21
-                and float(last["high"]) >= ema21 - atr * 0.25
+                and (
+                    float(last["high"]) >= ema21 - atr * 0.25
+                    or near_falling_resistance
+                )
                 and close < ema9
                 and close < float(last["open"])
                 and _safe_float(previous.get("ema9"), 0.0)
@@ -359,7 +380,7 @@ async def _fetch_gold_frame(timeframe, interval, outputsize=1500):
             )
         except MarketDataError as exc:
             match = re.search(
-                r"cooldown active\\. Try again in ([0-9.]+) seconds",
+                r"Try again in ([0-9.]+) seconds",
                 str(exc),
             )
             if not match or attempt == 5:
