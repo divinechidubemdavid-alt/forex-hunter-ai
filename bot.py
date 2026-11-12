@@ -323,6 +323,11 @@ async def _refresh_strong_signal_snapshot():
             errors.append(f"{symbol}: analysis error")
             logger.exception("Strong Signals analysis failed for %s.", symbol)
 
+    active_chart_ids = {str(item["id"]) for item in strong}
+    for cached_id in list(STRONG_SIGNAL_CHARTS):
+        if cached_id not in active_chart_ids:
+            STRONG_SIGNAL_CHARTS.pop(cached_id, None)
+
     snapshot_time = datetime.now(WAT)
     state.set_scanner_state("strong_signals_snapshot", {
         "updated_at": snapshot_time.isoformat(),
