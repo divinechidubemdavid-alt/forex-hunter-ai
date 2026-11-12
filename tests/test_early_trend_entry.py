@@ -45,7 +45,7 @@ class EarlyTrendEntryTests(unittest.TestCase):
         frame.loc[current, "open"] = 100.0
         frame.loc[current, "high"] = 101.0
         frame.loc[current, "low"] = 99.0
-        frame.loc[current, "close"] = 100.9
+        frame.loc[current, "close"] = 100.8
         frame.loc[current, "candle_range"] = 2.0
         frame.loc[current, "body"] = 0.9
         frame.loc[current, "support"] = 99.0
