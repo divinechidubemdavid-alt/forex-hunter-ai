@@ -43,7 +43,7 @@ class SupplyDemandChartTests(unittest.TestCase):
         )
 
         self.assertIsInstance(chart, BytesIO)
-        self.assertEqual(chart.read(8), b"\\x89PNG\\r\\n\\x1a\\n")
+        self.assertEqual(chart.read(8), b"\x89PNG\r\n\x1a\n")
 
     def test_supply_and_demand_zones_are_detected(self):
         zones = _supply_demand_zone_bounds(_candles())
