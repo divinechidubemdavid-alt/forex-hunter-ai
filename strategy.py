@@ -477,6 +477,59 @@ def _early_trend_setup(data):
     return None, None
 
 
+
+def _early_watch_setup(data):
+    """Describe a developing reversal area without issuing a trade signal."""
+    if len(data) < SUPPORT_RESISTANCE_LOOKBACK + 2:
+        return None
+
+    last = data.iloc[-1]
+    previous = data.iloc[-2]
+    atr = _safe_float(last.get("atr"))
+    if atr <= 0:
+        return None
+
+    support = _safe_float(last.get("support"))
+    resistance = _safe_float(last.get("resistance"))
+    low = _safe_float(last.get("low"))
+    high = _safe_float(last.get("high"))
+    rsi = _safe_float(last.get("rsi"), 50.0)
+    previous_rsi = _safe_float(previous.get("rsi"), 50.0)
+    plus_di = _safe_float(last.get("plus_di"))
+    minus_di = _safe_float(last.get("minus_di"))
+    previous_plus_di = _safe_float(previous.get("plus_di"))
+    previous_minus_di = _safe_float(previous.get("minus_di"))
+
+    near_support = support > 0 and low <= support + atr * 0.50
+    bullish_momentum_forming = (
+        rsi > previous_rsi
+        or plus_di > previous_plus_di
+        or minus_di < previous_minus_di
+    )
+    if near_support and bullish_momentum_forming:
+        return (
+            "BUY",
+            "Price is testing recent support and bullish momentum is beginning "
+            "to improve. Waiting for a strong completed rejection candle "
+            "before qualifying an early BUY."
+        )
+
+    near_resistance = resistance > 0 and high >= resistance - atr * 0.50
+    bearish_momentum_forming = (
+        rsi < previous_rsi
+        or minus_di > previous_minus_di
+        or plus_di < previous_plus_di
+    )
+    if near_resistance and bearish_momentum_forming:
+        return (
+            "SELL",
+            "Price is testing recent resistance and bearish momentum is "
+            "beginning to improve. Waiting for a strong completed rejection "
+            "candle before qualifying an early SELL."
+        )
+
+    return None
+
 def _early_entry_score(last, previous, direction, setup_name):
     """Score early-entry evidence; ADX is supporting evidence, not a gate."""
     score = 25
@@ -819,10 +872,15 @@ def analyze(frame, timeframe="15m"):
         direction = early_direction
         primary_strategy = "EARLY_TREND_ENTRY"
     else:
-        result["reason"] = (
-            "No qualifying early-entry, EMA trend or breakout-retest setup. "
-            "Waiting for a clearer opportunity."
-        )
+        watch = _early_watch_setup(data)
+        if watch:
+            result["signal_stage"] = "EARLY_WATCH"
+            result["reason"] = watch[1]
+        else:
+            result["reason"] = (
+                "No qualifying early-entry, EMA trend or breakout-retest setup. "
+                "Waiting for a clearer opportunity."
+            )
         return result
 
     labels = {
@@ -1039,7 +1097,8 @@ def format_signal(symbol, result):
             f"FOREX HUNTER AI\n"
             f"Market: {symbol}\n"
             f"Timeframe: {timeframe}\n"
-            f"Status: WAIT\n\n"
+            f"Status: WAIT\n"
+            f"Stage: {result.get('signal_stage', 'WAIT')}\n\n"
             f"Reason: {result.get('reason', 'No setup.')}\n\n"
             "Analysis only. No orders have been placed."
         )
