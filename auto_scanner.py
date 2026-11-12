@@ -272,7 +272,7 @@ async def _scan_market(app, symbol):
     try:
         frame = await fetch_candles(
             MARKETS[symbol],
-            outputsize=1500,
+            outputsize=500,
             interval="15m",
             purpose="auto",
         )
