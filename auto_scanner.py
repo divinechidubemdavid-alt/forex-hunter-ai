@@ -84,7 +84,7 @@ def _markets_for_cycle(now):
     Return every currently eligible market for this scan cycle.
 
     Gold is checked first, then the six forex pairs in a rotating
-    order. BTC/USD is checked on weekends, when forex is closed.
+    order, followed by BTC/USD. Weekends remain BTC/USD-only.
     No eligible market is skipped merely because another market
     has priority.
     """
