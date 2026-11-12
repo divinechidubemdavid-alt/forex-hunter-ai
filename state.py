@@ -5,7 +5,6 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
 from config import (
     STATE_FILE,
