@@ -303,9 +303,9 @@ async def _save_registered_account(message, context, user_id, wizard):
             {"Starting balance": profile["starting_balance"]}
         ),
         caption=(
-            f"✅ Account registered: {profile['name']}\\n"
-            f"Type: {profile['account_type']}\\n"
-            f"Starting balance: {profile['starting_balance']} {profile['currency']}\\n"
+            f"✅ Account registered: {profile['name']}\n"
+            f"Type: {profile['account_type']}\n"
+            f"Starting balance: {profile['starting_balance']} {profile['currency']}\n"
             "Rules are marked UNVERIFIED. Check your firm's official dashboard/rulebook before relying on them."
         ),
         reply_markup=_home_keyboard(),
