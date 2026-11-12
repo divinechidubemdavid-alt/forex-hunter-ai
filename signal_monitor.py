@@ -783,7 +783,7 @@ async def _fetch_monitor_frame(symbol, timeframe):
                 MARKETS[symbol],
                 outputsize=100,
                 interval=timeframe,
-                purpose="monitor",
+                purpose="gold_monitor" if symbol == "XAU/USD" else "monitor",
             )
         except MarketDataError as exc:
             match = re.search(r"cooldown active\. Try again in ([0-9.]+) seconds", str(exc))
