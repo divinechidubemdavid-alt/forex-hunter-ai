@@ -213,7 +213,7 @@ async def _fetch_strong_market_frame(symbol):
         try:
             return await fetch_candles(
                 MARKETS[symbol],
-                outputsize=500,
+                outputsize=1500,
                 interval="15m",
                 purpose="auto",
             )
@@ -238,7 +238,7 @@ async def _refresh_strong_signal_snapshot():
     now = datetime.now(WAT)
     weekend_only = now.weekday() >= 5
     scan_markets = get_strong_signal_markets(MARKETS, now.weekday())
-    market_scope = "weekend_btc_only" if weekend_only else "weekday_forex_gold"
+    market_scope = "weekend_btc_only" if weekend_only else "weekday_all_markets"
 
     saved = state.get_scanner_state("strong_signals_snapshot", {}) or {}
     saved_at = saved.get("updated_at")
@@ -401,6 +401,7 @@ async def show_strong_signals(update, context):
         if (
             item.get("direction") in ("BUY", "SELL")
             and float(item.get("score", 0)) >= 70
+            and item.get("trading_style") == "DAY"
         ):
             strong.append(item)
 
