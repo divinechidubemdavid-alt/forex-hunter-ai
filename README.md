@@ -39,7 +39,7 @@ Technical checks use completed candles and the existing EMA/ADX/RSI/ATR and brea
 
 ## Trading styles
 
-Manual **Analyze Market** starts by asking the user to choose a style, then only that style's entry timeframes, then the market:
+Manual **Analyze Market** starts by asking the user to choose a style, then only that style's entry timeframes, then the market, followed by an explicit **Generate Analysis** confirmation button:
 
 | Style | Entry timeframes | Required completed higher-timeframe confirmation |
 |---|---|---|
