@@ -114,11 +114,11 @@ class ApiBudgetProtectionTests(unittest.TestCase):
     def test_utc_day_rollover_resets_all_api_pools(self):
         fresh = self._fresh_state()
         fresh.update({
-            "date": "2026-11-11",
+            "date": "2026-11-12",
             "api_requests": 700,
             "api_gold_monitor_requests": 350,
             "api_other_background_requests": 350,
-            "last_request_epoch": 12345.0,
+            "last_request_epoch": 1794438000.0,
         })
         with patch.object(state, "_state", fresh), patch.object(
             state, "_today", return_value="2026-11-12"
@@ -128,6 +128,27 @@ class ApiBudgetProtectionTests(unittest.TestCase):
         self.assertEqual(fresh["api_gold_monitor_requests"], 0)
         self.assertEqual(fresh["api_other_background_requests"], 0)
         self.assertEqual(fresh["last_request_epoch"], 0.0)
+
+    def test_migrating_old_local_date_preserves_same_utc_day_requests(self):
+        from datetime import datetime, timezone
+
+        fresh = self._fresh_state()
+        current_utc = datetime(2026, 11, 11, 23, 30, tzinfo=timezone.utc)
+        fresh.update({
+            "date": "2026-11-12",
+            "api_requests": 12,
+            "api_gold_monitor_requests": 5,
+            "api_other_background_requests": 7,
+            "last_request_epoch": current_utc.timestamp(),
+        })
+        with patch.object(state, "_state", fresh), patch.object(
+            state, "_today", return_value="2026-11-11"
+        ):
+            state._refresh_daily_counter()
+        self.assertEqual(fresh["date"], "2026-11-11")
+        self.assertEqual(fresh["api_requests"], 12)
+        self.assertEqual(fresh["api_gold_monitor_requests"], 5)
+        self.assertEqual(fresh["api_other_background_requests"], 7)
 
 
 if __name__ == "__main__":
