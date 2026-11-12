@@ -3,7 +3,10 @@ from unittest.mock import patch
 
 import config
 import state
+from auto_scanner import _eligible_markets
 from market_scope import get_session_markets, is_market_allowed
+from zoneinfo import ZoneInfo
+from datetime import datetime
 
 
 class MarketScopeTests(unittest.TestCase):
@@ -25,6 +28,17 @@ class MarketScopeTests(unittest.TestCase):
 
     def test_gold_has_half_priority_setting(self):
         self.assertEqual(config.GOLD_BUDGET_SHARE, 0.5)
+
+    def test_automatic_scanner_uses_only_retained_weekday_markets(self):
+        now = datetime(2026, 11, 9, 12, 0, tzinfo=ZoneInfo("Africa/Lagos"))
+        self.assertEqual(
+            _eligible_markets(now),
+            ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY"],
+        )
+
+    def test_automatic_scanner_is_bitcoin_only_on_weekends(self):
+        now = datetime(2026, 11, 14, 12, 0, tzinfo=ZoneInfo("Africa/Lagos"))
+        self.assertEqual(_eligible_markets(now), ["BTC/USD"])
 
 
 class ApiBudgetProtectionTests(unittest.TestCase):
