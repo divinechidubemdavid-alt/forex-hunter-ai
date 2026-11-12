@@ -888,6 +888,18 @@ def analyze(frame, timeframe="15m"):
         "BREAKOUT_RETEST": "Breakout and Retest",
         "EARLY_TREND_ENTRY": "Early Trend Entry",
     }
+    # Keep the original ADX requirement for the two established strategies.
+    # Only Early Trend Entry may qualify while ADX is still developing.
+    if (
+        primary_strategy != "EARLY_TREND_ENTRY"
+        and result["adx"] < ADX_MINIMUM
+    ):
+        result["reason"] = (
+            f"Trend strength too weak for {labels[primary_strategy]}: "
+            f"ADX {result['adx']:.1f}; minimum {ADX_MINIMUM:.1f}."
+        )
+        return result
+
     if _move_is_extended(last, direction):
         result["signal_stage"] = "MOVE_EXTENDED"
         result["reason"] = (
@@ -942,6 +954,8 @@ def analyze(frame, timeframe="15m"):
         )
 
     if score < MINIMUM_SCORE:
+        if primary_strategy == "EARLY_TREND_ENTRY":
+            result["signal_stage"] = "EARLY_WATCH"
         result["score"] = score
         result["score_label"] = (
             "Weak" if score < 50
