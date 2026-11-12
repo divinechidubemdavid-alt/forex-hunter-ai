@@ -1,9 +1,13 @@
 import unittest
+from datetime import datetime
+from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
 from gold_monitor import (
+    _gold_monitor_cycle,
     GOLD_FETCH_SCHEDULE,
     GOLD_SOURCE_OUTPUTSIZE,
     _breakout_retest,
@@ -137,6 +141,18 @@ class GoldApiScheduleTests(unittest.TestCase):
             estimated_daily_gold_requests(),
             350,
         )
+
+    def test_weekend_cycle_makes_no_gold_api_request(self):
+        class App:
+            pass
+
+        saturday = datetime(
+            2026, 11, 14, 12, 0, tzinfo=ZoneInfo("Africa/Lagos")
+        ).timestamp()
+        with patch("gold_monitor.fetch_candles", new_callable=AsyncMock) as fetch:
+            import asyncio
+            asyncio.run(_gold_monitor_cycle(App(), now_epoch=saturday))
+        fetch.assert_not_awaited()
 
     def test_single_m1_feed_can_be_resampled_for_m5_and_m15(self):
         from market_data import resample_candles
