@@ -80,6 +80,8 @@ def _load_state():
     if data.get("date") != _today():
         data["date"] = _today()
         data["api_requests"] = 0
+        data["api_gold_monitor_requests"] = 0
+        data["api_other_background_requests"] = 0
         data["last_request_epoch"] = 0.0
 
     return data
