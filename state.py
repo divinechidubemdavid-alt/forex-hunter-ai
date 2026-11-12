@@ -22,7 +22,8 @@ def _now():
 
 
 def _today():
-    return datetime.now(ZoneInfo("Africa/Lagos")).date().isoformat()
+    # Twelve Data Basic's 800-credit daily quota resets at 00:00 UTC.
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def _empty_state():
