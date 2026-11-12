@@ -12,6 +12,7 @@ from config import (
     MIN_REQUEST_INTERVAL_SECONDS,
     API_RESERVE_REQUESTS,
     GOLD_BUDGET_SHARE,
+    MARKETS,
 )
 
 _lock = threading.RLock()
@@ -227,13 +228,13 @@ def ensure_user(user_id):
         user = _state["users"].setdefault(key, {})
 
         user.setdefault("monitoring_enabled", True)
-        user.setdefault("markets", [
-            "XAU/USD",
-            "EUR/USD",
-            "GBP/USD",
-            "USD/JPY",
-            "BTC/USD",
-        ])
+        user.setdefault("markets", list(MARKETS))
+        # Remove retired markets from old saved preferences without touching
+        # the user's other profile, risk, or performance data.
+        if isinstance(user.get("markets"), list):
+            user["markets"] = [
+                symbol for symbol in user["markets"] if symbol in MARKETS
+            ]
         user.setdefault("notifications", {
             "new_signals": True,
             "tp1": True,
@@ -278,6 +279,11 @@ def update_user_setting(user_id, setting, value):
     with _lock:
         key = str(user_id)
         user = _state["users"].setdefault(key, {})
+        if setting == "markets":
+            value = [
+                symbol for symbol in (value or [])
+                if symbol in MARKETS
+            ]
         user[setting] = value
         _save()
         return dict(user)
