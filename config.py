@@ -96,6 +96,7 @@ WEEKDAY_MARKETS = (
     "AUD/USD",
     "USD/CAD",
     "USD/CHF",
+    "BTC/USD",
 )
 
 # Weekend session: Bitcoin only.
