@@ -773,13 +773,20 @@ def _timeframe_context(frame, timeframe):
     """Read a completed higher-timeframe EMA trend; fail closed if data is thin."""
     try:
         higher = _weekly_candles(frame) if timeframe == "1week" else resample_candles(frame, timeframe)
-        higher = calculate_indicators(higher).dropna()
-        if len(higher) < 30:
+        if higher is None or higher.empty or len(higher) < 25:
             return "UNAVAILABLE"
-        last = higher.iloc[-1]
-        if last["ema9"] > last["ema21"]:
+        close = pd.to_numeric(higher["close"], errors="coerce").dropna()
+        if len(close) < 25:
+            return "UNAVAILABLE"
+        ema_fast = close.ewm(span=9, adjust=False, min_periods=9).mean()
+        ema_slow = close.ewm(span=21, adjust=False, min_periods=21).mean()
+        fast_value = _safe_float(ema_fast.iloc[-1])
+        slow_value = _safe_float(ema_slow.iloc[-1])
+        if fast_value is None or slow_value is None:
+            return "UNAVAILABLE"
+        if fast_value > slow_value:
             return "BULLISH"
-        if last["ema9"] < last["ema21"]:
+        if fast_value < slow_value:
             return "BEARISH"
         return "NEUTRAL"
     except Exception:
