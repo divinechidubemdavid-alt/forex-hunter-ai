@@ -33,6 +33,15 @@ GOLD_FETCH_SCHEDULE = {
     "4h": 4 * 60 * 60,
     "1day": 24 * 60 * 60,
 }
+GOLD_AUTOMATIC_SCAN_INTERVAL_SECONDS = 30 * 60
+
+
+def estimated_daily_gold_requests():
+    """Upper-bound estimate for Gold monitor plus the 30-minute Gold scanner."""
+    return sum(
+        86400 // interval
+        for interval in GOLD_FETCH_SCHEDULE.values()
+    ) + (86400 // GOLD_AUTOMATIC_SCAN_INTERVAL_SECONDS)
 
 
 def _slot_due(key, interval_seconds, now_epoch=None):
@@ -403,15 +412,14 @@ async def _gold_monitor_cycle(app, now_epoch=None):
     ):
         return
 
-    retry_after = float(state.get_scanner_state("gold_monitor:retry_after", 0) or 0)
-    if now_epoch < retry_after:
-        return
-
+    source_retry_key = "gold_monitor:retry_after:m1_source"
+    source_retry_after = float(state.get_scanner_state(source_retry_key, 0) or 0)
     source_due, source_slot = _slot_due("m1_source", GOLD_FETCH_SCHEDULE["m1_source"], now_epoch)
-    if source_due:
+    if source_due and now_epoch >= source_retry_after:
         try:
             source = await _fetch_gold_frame("1m", "1m", GOLD_SOURCE_OUTPUTSIZE)
             _mark_slot("m1_source", source_slot)
+            state.set_scanner_state(source_retry_key, 0)
             for timeframe in ("1m", "5m", "15m"):
                 frame = resample_candles(source, timeframe)
                 if len(frame) >= 80:
@@ -423,19 +431,28 @@ async def _gold_monitor_cycle(app, now_epoch=None):
                     )
         except (MarketDataError, ValueError) as exc:
             logger.warning("Gold M1/M5/M15 monitoring delayed: %s", exc)
-            state.set_scanner_state("gold_monitor:retry_after", now_epoch + 60)
+            state.set_scanner_state(
+                source_retry_key,
+                now_epoch + GOLD_FETCH_SCHEDULE["m1_source"],
+            )
 
     for timeframe, interval in (("30m", "30m"), ("1h", "1h"), ("4h", "4h"), ("1day", "1day")):
+        retry_key = f"gold_monitor:retry_after:{timeframe}"
+        retry_after = float(state.get_scanner_state(retry_key, 0) or 0)
         due, slot = _slot_due(timeframe, GOLD_FETCH_SCHEDULE[timeframe], now_epoch)
-        if not due:
+        if not due or now_epoch < retry_after:
             continue
         try:
             frame = await _fetch_gold_frame(timeframe, interval, 1500)
             _mark_slot(timeframe, slot)
+            state.set_scanner_state(retry_key, 0)
             await _analyse_and_notify(app, timeframe, frame)
         except (MarketDataError, ValueError) as exc:
             logger.warning("Gold %s monitoring delayed: %s", timeframe, exc)
-            state.set_scanner_state("gold_monitor:retry_after", now_epoch + 60)
+            state.set_scanner_state(
+                retry_key,
+                now_epoch + GOLD_FETCH_SCHEDULE[timeframe],
+            )
 
 
 async def gold_market_monitor_loop(app):
