@@ -51,6 +51,30 @@ def _empty_state():
     }
 
 
+def _api_counter_needs_reset(data):
+    today = _today()
+    try:
+        last_epoch = float(data.get("last_request_epoch", 0.0))
+    except (TypeError, ValueError):
+        last_epoch = 0.0
+
+    if last_epoch > 0:
+        last_request_day = datetime.fromtimestamp(
+            last_epoch, timezone.utc
+        ).date().isoformat()
+        return last_request_day != today
+
+    return data.get("date") != today
+
+
+def _reset_api_counters(data):
+    data["date"] = _today()
+    data["api_requests"] = 0
+    data["api_gold_monitor_requests"] = 0
+    data["api_other_background_requests"] = 0
+    data["last_request_epoch"] = 0.0
+
+
 def _load_state():
     data = _empty_state()
 
@@ -102,30 +126,6 @@ def _save():
         json.dump(_state, file, indent=2, ensure_ascii=False)
 
     os.replace(temporary, STATE_FILE)
-
-
-def _api_counter_needs_reset(data):
-    today = _today()
-    try:
-        last_epoch = float(data.get("last_request_epoch", 0.0))
-    except (TypeError, ValueError):
-        last_epoch = 0.0
-
-    if last_epoch > 0:
-        last_request_day = datetime.fromtimestamp(
-            last_epoch, timezone.utc
-        ).date().isoformat()
-        return last_request_day != today
-
-    return data.get("date") != today
-
-
-def _reset_api_counters(data):
-    data["date"] = _today()
-    data["api_requests"] = 0
-    data["api_gold_monitor_requests"] = 0
-    data["api_other_background_requests"] = 0
-    data["last_request_epoch"] = 0.0
 
 
 def _refresh_daily_counter():
