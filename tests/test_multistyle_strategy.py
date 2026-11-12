@@ -62,6 +62,12 @@ class MultiStyleStrategyTests(unittest.TestCase):
         self.assertNotIn("stop_loss", result)
         self.assertNotIn("take_profits", result)
         self.assertNotIn("risk_distance", result)
+        message = strategy.format_signal("EUR/USD", result)
+        self.assertIn("SCALPING TRADE", message)
+        self.assertNotIn("Stop Loss:", message)
+        self.assertNotIn("TP1", message)
+        self.assertNotIn("TP2", message)
+        self.assertNotIn("TP3", message)
 
     def test_day_trade_keeps_structural_stop_and_three_targets(self):
         result = self._run_analysis(
