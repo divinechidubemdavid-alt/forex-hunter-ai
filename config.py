@@ -81,7 +81,7 @@ STATE_FILE = "runtime_state.json"
 MANUAL_ONLY = True
 PLACE_BROKER_ORDERS = False
 
-# Adaptive scanner policy.
+# Gold receives half of the protected background monitoring budget.
 GOLD_BUDGET_SHARE = 0.50
 
 # Single source of truth for session eligibility.
