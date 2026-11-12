@@ -27,8 +27,11 @@ PARTIAL_FRACTION = 1.0 / 3.0
 
 
 def _style_label_for_signal(signal):
+    value = signal.get("trading_style")
+    if not value:
+        return "LEGACY / UNKNOWN"
     try:
-        return style_label(signal.get("trading_style", ""))
+        return style_label(value)
     except ValueError:
         return "LEGACY / UNKNOWN"
 
