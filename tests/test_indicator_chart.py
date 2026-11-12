@@ -43,7 +43,7 @@ class IndicatorChartTests(unittest.TestCase):
         )
 
         self.assertIsInstance(chart, BytesIO)
-        self.assertEqual(chart.read(8), b"\\x89PNG\\r\\n\\x1a\\n")
+        self.assertEqual(chart.read(8), b"\x89PNG\r\n\x1a\n")
 
     def test_chart_uses_the_strategy_engines_indicator_columns(self):
         indicators = calculate_indicators(_candles())
