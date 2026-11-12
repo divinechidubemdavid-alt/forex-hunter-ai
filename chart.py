@@ -227,10 +227,8 @@ def create_market_chart(
         raise ValueError("Candle data is missing OHLC values.")
 
     # Use the strategy engine as the single source of truth for every plotted indicator.
+    # EMA 50 is calculated before the display window is trimmed, preserving warm-up history.
     data = calculate_indicators(candles).tail(80).copy()
-
-    # EMA 50 is a visual higher-trend reference only; it does not alter signal rules.
-    data["ema50"] = data["close"].ewm(span=50, adjust=False).mean()
 
     for column in required:
         data[column] = pd.to_numeric(
