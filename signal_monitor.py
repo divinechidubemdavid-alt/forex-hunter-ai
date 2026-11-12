@@ -15,6 +15,7 @@ from config import TWELVE_DATA_API_KEY
 import websockets
 from strategy import assess_trend_health
 from chart import create_market_chart
+from trading_styles import style_label
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,13 @@ PRICE_STREAM_URL = "wss://ws.twelvedata.com/v1/quotes/price"
 PRICE_STREAM_HEARTBEAT_SECONDS = 10
 PRICE_STREAM_RECONNECT_MAX_SECONDS = 60
 PARTIAL_FRACTION = 1.0 / 3.0
+
+
+def _style_label_for_signal(signal):
+    try:
+        return style_label(signal.get("trading_style", ""))
+    except ValueError:
+        return "LEGACY / UNKNOWN"
 
 
 def _number(value):
@@ -129,6 +137,15 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
     ).upper()
 
     if direction not in ("BUY", "SELL"):
+        return
+
+    if str(signal.get("trading_style", "")).upper() == "SCALPING":
+        # Scalping has no Stop Loss or TP levels. Record candle progress and
+        # let the reversal monitor evaluate completed-candle invalidation.
+        state.update_signal(signal_id, {
+            "current_price": _number(candle.get("close")),
+            "last_checked": str(candle_time),
+        })
         return
 
     entry = _number(signal.get("entry"))
@@ -345,6 +362,15 @@ async def _check_one_price(app, user_id, signal, quote):
 
     direction = str(signal.get("direction") or "").upper()
     if direction not in {"BUY", "SELL"}:
+        return
+
+    if str(signal.get("trading_style", "")).upper() == "SCALPING":
+        # Quotes update the display only; scalp exits are not represented as
+        # hidden price-based Stop Loss or take-profit levels.
+        state.update_signal(signal_id, {
+            "current_price": _number(quote.get("bid") or quote.get("price")),
+            "last_price_timestamp": datetime.now(timezone.utc).isoformat(),
+        })
         return
 
     # A long position exits on bid; a short position exits on ask.
@@ -628,6 +654,14 @@ async def _check_trend_warning(app, user_id, signal, frame):
         warning["message"],
         {"candle_time": warning["candle_time"]},
     )
+    is_scalping = str(signal.get("trading_style", "")).upper() == "SCALPING"
+    if is_scalping and warning["type"] == "TREND_REVERSAL_WARNING":
+        state.complete_signal(
+            signal_id,
+            "INVALIDATED",
+            "Scalping setup invalidated by a confirmed completed-candle "
+            "reversal warning. No Stop Loss or take-profit levels were used.",
+        )
     settings = state.get_user_settings(user_id) or {}
     mode = str(settings.get("tracking_notification_mode", "silent")).lower()
     if mode not in {"important", "all"}:
@@ -644,11 +678,12 @@ async def _check_trend_warning(app, user_id, signal, frame):
             stop_loss=signal.get("stop_loss"),
             take_profits=_targets(signal),
             strategy=signal.get("strategy"),
+            trading_style=signal.get("trading_style"),
         )
         chart.seek(0)
         latest = float(frame["close"].iloc[-1])
         caption = (
-            f"⚠️ TREND WEAKENING / REVERSAL RISK\n"
+            f"⚠️ {_style_label_for_signal(signal)} — TREND WEAKENING / REVERSAL RISK\n"
             f"{signal.get('symbol', 'Tracked signal')} — {signal.get('direction', '')}\n"
             f"Signal #{signal_id} | {timeframe.upper()}\n"
             f"Latest closed-candle price: {latest:g}\n"
@@ -684,19 +719,24 @@ async def _refresh_saved_chart(app, user_id, signal, frame):
             stop_loss=signal.get("stop_loss"),
             take_profits=_targets(signal),
             strategy=signal.get("strategy"),
+            trading_style=signal.get("trading_style"),
         )
         chart.seek(0)
         latest = float(frame["close"].iloc[-1])
         caption = (
-            f"📈 {signal.get('symbol', 'Unknown')} — {signal.get('direction', 'N/A')}\n"
+            f"📈 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Unknown')} — {signal.get('direction', 'N/A')}\n"
             f"Signal #{signal_id} | {timeframe.upper()}\n"
             f"Latest closed-candle price: {latest:g}\n"
-            f"Entry: {signal.get('entry', 'N/A')} | SL: {signal.get('stop_loss', 'N/A')}\n"
-            f"TP1: {signal.get('tp1', 'N/A')} | TP2: {signal.get('tp2', 'N/A')} | "
-            f"TP3: {signal.get('tp3', 'N/A')}\n"
-            f"Progress: {'✓' if signal.get('tp1_hit') else '○'} TP1  "
-            f"{'✓' if signal.get('tp2_hit') else '○'} TP2  "
-            f"{'✓' if signal.get('tp3_hit') else '○'} TP3\n"
+            + (
+                f"Entry: {signal.get('entry', 'N/A')} | SL: {signal.get('stop_loss', 'N/A')}\n"
+                f"TP1: {signal.get('tp1', 'N/A')} | TP2: {signal.get('tp2', 'N/A')} | "
+                f"TP3: {signal.get('tp3', 'N/A')}\n"
+                f"Progress: {'✓' if signal.get('tp1_hit') else '○'} TP1  "
+                f"{'✓' if signal.get('tp2_hit') else '○'} TP2  "
+                f"{'✓' if signal.get('tp3_hit') else '○'} TP3\n"
+                if str(signal.get("trading_style", "")).upper() != "SCALPING"
+                else "Management: completed-candle reversal / invalidation monitoring\n"
+            )
             f"Status: {signal.get('status', 'TRACKING')}\n"
             "Updated from completed candles. Not a tick-by-tick live feed."
         )[:950]
