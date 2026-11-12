@@ -24,6 +24,41 @@ def _number(value, label, minimum=0.0, maximum=1_000_000_000.0):
     return result
 
 
+def normalise_account_type(value):
+    """Accept clear user-facing account-type labels and return the stored enum."""
+    text = str(value or "").strip().upper().replace("-", "_")
+    aliases = {
+        "PERSONAL": "PERSONAL",
+        "PERSONAL ACCOUNT": "PERSONAL",
+        "PROP_CHALLENGE": "PROP_CHALLENGE",
+        "PROP CHALLENGE": "PROP_CHALLENGE",
+        "PROP FIRM CHALLENGE": "PROP_CHALLENGE",
+        "FUNDED_PROP": "FUNDED_PROP",
+        "FUNDED PROP": "FUNDED_PROP",
+        "FUNDED ACCOUNT": "FUNDED_PROP",
+    }
+    try:
+        return aliases[text]
+    except KeyError as exc:
+        raise ValueError("Choose PERSONAL, PROP_CHALLENGE or FUNDED_PROP.") from exc
+
+
+def account_registration_steps(account_type=None):
+    """Return the correct wizard order; personal accounts skip firm name."""
+    steps = ["name", "account_type"]
+    if account_type != "PERSONAL":
+        steps.append("firm_name")
+    steps.extend([
+        "starting_balance",
+        "currency",
+        "daily_loss_percent",
+        "overall_loss_percent",
+        "profit_target_percent",
+        "drawdown_model",
+    ])
+    return steps
+
+
 def validate_profile(profile):
     name = str(profile.get("name", "")).strip()
     if not name or len(name) > 60:

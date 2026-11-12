@@ -117,6 +117,21 @@ class AccountManagerTests(unittest.TestCase):
                 "rules": {"drawdown_model": "UNKNOWN"},
             })
 
+    def test_account_type_accepts_personal_account_label(self):
+        from account_manager import normalise_account_type
+        self.assertEqual(normalise_account_type("Personal Account"), "PERSONAL")
+
+    def test_registration_sequence_skips_firm_name_for_personal_account(self):
+        from account_manager import account_registration_steps
+        steps = account_registration_steps("PERSONAL")
+        self.assertEqual(steps[:3], ["name", "account_type", "starting_balance"])
+        self.assertIn("currency", steps)
+
+    def test_registration_sequence_keeps_firm_name_for_prop_accounts(self):
+        from account_manager import account_registration_steps
+        steps = account_registration_steps("PROP_CHALLENGE")
+        self.assertEqual(steps[:3], ["name", "account_type", "firm_name"])
+
 
 if __name__ == "__main__":
     unittest.main()
