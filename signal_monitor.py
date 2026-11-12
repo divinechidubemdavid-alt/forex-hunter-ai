@@ -232,7 +232,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         )
         await _notify(
             app, user_id, settings, "system",
-            f"⚠️ {signal.get('symbol', 'Signal')}: outcome is ambiguous. "
+            f"⚠️ {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: outcome is ambiguous. "
             "The stop loss and a new target were both touched in one "
             "candle. Please review the chart.",
         )
@@ -262,7 +262,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         )
         await _notify(
             app, user_id, settings, "stop_loss",
-            f"🛑 {signal.get('symbol', 'Signal')}: stop loss reached. "
+            f"🛑 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: stop loss reached. "
             f"Realised result: {realised:+.2f}R.",
         )
         return
@@ -321,7 +321,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
                     )],
                 ])
             message = (
-                f"🎯 {signal.get('symbol', 'Signal')}: TP{target_number} reached. "
+                f"🎯 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: TP{target_number} reached. "
                 f"One-third partial exit recorded. Realised result: {realised:+.2f}R."
             )
             if keyboard:
@@ -447,7 +447,7 @@ async def _check_one_price(app, user_id, signal, quote):
         )
         await _notify(
             app, user_id, settings, "system",
-            f"⚠️ {signal.get('symbol', 'Signal')}: price gap crossed both a target "
+            f"⚠️ {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: price gap crossed both a target "
             "and stop loss between quotes. Outcome marked ambiguous for review.",
         )
         return
@@ -472,7 +472,7 @@ async def _check_one_price(app, user_id, signal, quote):
         )
         await _notify(
             app, user_id, settings, "stop_loss",
-            f"🛑 {signal.get('symbol', 'Signal')}: stop loss reached. "
+            f"🛑 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: stop loss reached. "
             f"Live quote: {price:g}. Realised result: {realised:+.2f}R.",
         )
         return
@@ -696,7 +696,7 @@ async def _check_trend_warning(app, user_id, signal, frame):
         logger.exception("Could not send trend-warning chart for signal %s.", signal_id)
         await _notify(
             app, user_id, settings, "trend_warning",
-            f"⚠️ {signal.get('symbol', 'Tracked signal')} — {warning['message']}\n"
+            f"⚠️ {_style_label_for_signal(signal)} — {signal.get('symbol', 'Tracked signal')} — {warning['message']}\n"
             "⚠️ Warning chart could not be generated this time.",
         )
 
