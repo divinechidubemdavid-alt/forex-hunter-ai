@@ -83,8 +83,8 @@ def _markets_for_cycle(now):
     """
     Return every currently eligible market for this scan cycle.
 
-    Gold is checked first, then the six forex pairs in a rotating
-    order, followed by BTC/USD. Weekends remain BTC/USD-only.
+    Gold is checked first, then the three retained forex pairs in a
+    rotating order. Weekends remain BTC/USD-only.
     No eligible market is skipped merely because another market
     has priority.
     """
@@ -275,7 +275,7 @@ async def _scan_market(app, symbol):
             MARKETS[symbol],
             outputsize=500,
             interval="15m",
-            purpose="auto",
+            purpose="gold_monitor" if symbol == "XAU/USD" else "auto",
         )
 
         result = analyze(
