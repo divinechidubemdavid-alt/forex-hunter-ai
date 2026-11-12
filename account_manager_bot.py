@@ -74,7 +74,7 @@ async def handle_account_callback(update, context):
         context.user_data["account_wizard"] = {"step": "name"}
         await query.message.reply_photo(
             photo=render_account_action_report("Register Trading Account", "Set up a prop challenge, funded or personal account"),
-            caption="Let's register an account.\n\n1/9 — Send an account nickname, for example: My $5K Challenge"
+            caption="Let's register an account.\n\nStep 1 — Send an account nickname, for example: My Personal Account."
         )
     elif action == "list":
         profiles = state.get_account_profiles(user_id)
@@ -277,15 +277,15 @@ async def handle_account_text(update, context):
     if wizard:
         step = wizard["step"]
         prompts = {
-            "name": "1/9 — Send an account nickname, for example: My Personal Account.",
-            "account_type": "2/9 — Choose account type: PERSONAL, PROP_CHALLENGE, or FUNDED_PROP. You can also type Personal Account.",
-            "firm_name": "3/9 — Enter the prop-firm name, or send - if not applicable.",
-            "starting_balance": "4/9 — Enter starting balance as a number, for example 5000.",
-            "currency": "5/9 — Enter currency: USD, EUR, GBP or NGN.",
-            "daily_loss_percent": "6/9 — Daily loss limit percentage, or 0 if unknown/not applicable.",
-            "overall_loss_percent": "7/9 — Overall maximum loss percentage, or 0 if unknown/not applicable.",
-            "profit_target_percent": "8/9 — Profit target percentage, or 0 if unknown/not applicable.",
-            "drawdown_model": "9/9 — Drawdown model: STATIC or TRAILING. If unsure, use STATIC as a placeholder and verify the firm's rules.",
+            "name": "Account nickname — send a name, for example: My Personal Account.",
+            "account_type": "Account type — choose PERSONAL, PROP_CHALLENGE, or FUNDED_PROP. You can also type Personal Account.",
+            "firm_name": "Prop firm — enter its name, or send - if not applicable.",
+            "starting_balance": "Starting balance — enter a number, for example 5000.",
+            "currency": "Currency — enter USD, EUR, GBP or NGN.",
+            "daily_loss_percent": "Daily loss limit — enter a percentage, or 0 if unknown/not applicable.",
+            "overall_loss_percent": "Overall maximum loss — enter a percentage, or 0 if unknown/not applicable.",
+            "profit_target_percent": "Profit target — enter a percentage, or 0 if unknown/not applicable.",
+            "drawdown_model": "Drawdown model — send STATIC or TRAILING. If unsure, use STATIC as a placeholder and verify the firm's rules.",
         }
         try:
             if step not in prompts:
