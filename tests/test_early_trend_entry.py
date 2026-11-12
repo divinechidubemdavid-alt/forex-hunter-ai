@@ -78,6 +78,27 @@ class EarlyTrendEntryTests(unittest.TestCase):
         self.assertLess(result["adx"], strategy.ADX_MINIMUM)
         self.assertEqual(len(result["take_profits"]), 3)
 
+    def test_early_watch_is_not_promoted_to_a_trade_signal(self):
+        frame = _indicator_frame()
+        with (
+            patch.object(strategy, "resample_candles", return_value=frame),
+            patch.object(strategy, "calculate_indicators", return_value=frame),
+            patch.object(strategy, "_higher_timeframe_context", return_value="UNAVAILABLE"),
+            patch.object(strategy, "_trend_setup", return_value=None),
+            patch.object(strategy, "_breakout_retest_setup", return_value=None),
+            patch.object(strategy, "_early_trend_setup", return_value=(None, None)),
+            patch.object(
+                strategy,
+                "_early_watch_setup",
+                return_value=("BUY", "Waiting for rejection confirmation."),
+            ),
+        ):
+            result = strategy.analyze(frame, "15m")
+
+        self.assertEqual(result["status"], "WAIT")
+        self.assertEqual(result["signal_stage"], "EARLY_WATCH")
+        self.assertIsNone(result["entry"])
+
     def test_extended_move_is_rejected_instead_of_chased(self):
         frame = _indicator_frame()
         frame.loc[frame.index[-1], "close"] = 102.0
