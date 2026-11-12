@@ -81,7 +81,9 @@ def create_performance_report(signals, period_label="All time"):
                  for i in (1, 2, 3)]
     style_counts = {
         label: sum(_style(s) == label for s in signals)
-        for label in ("SCALPING TRADE", "DAY TRADE", "SWING TRADE")
+        for label in (
+            "SCALPING TRADE", "DAY TRADE", "SWING TRADE", "LEGACY / UNKNOWN"
+        )
     }
 
     fig = _base("PERFORMANCE CENTRE", f"{period_label}  •  {datetime.now(WAT):%d %b %Y, %H:%M} WAT")
