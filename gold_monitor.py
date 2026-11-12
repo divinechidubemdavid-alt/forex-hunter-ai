@@ -119,15 +119,61 @@ def _breakout_retest(frame, watch, atr):
     level = _safe_float(watch.get("level"))
     if direction not in {"UP", "DOWN"} or level is None:
         return None
-    last = frame.iloc[-1]
-    tolerance = atr * 0.30
-    if direction == "UP":
-        touched = float(last["low"]) <= level + tolerance
-        held = float(last["close"]) > level and float(last["close"]) > float(last["open"])
+
+    candidates = frame
+    breakout_time = pd.to_datetime(
+        watch.get("candle_time"), utc=True, errors="coerce"
+    )
+    if isinstance(frame.index, pd.DatetimeIndex) and not pd.isna(breakout_time):
+        candidates = frame.loc[frame.index > breakout_time]
     else:
-        touched = float(last["high"]) >= level - tolerance
-        held = float(last["close"]) < level and float(last["close"]) < float(last["open"])
-    return direction if touched and held else None
+        candidates = frame.tail(1)
+
+    tolerance = atr * 0.30
+    for _, candle in candidates.iterrows():
+        if direction == "UP":
+            touched = float(candle["low"]) <= level + tolerance
+            held = (
+                float(candle["close"]) > level
+                and float(candle["close"]) > float(candle["open"])
+            )
+        else:
+            touched = float(candle["high"]) >= level - tolerance
+            held = (
+                float(candle["close"]) < level
+                and float(candle["close"]) < float(candle["open"])
+            )
+        if touched and held:
+            return direction
+    return None
+
+
+def _recent_trendline_breakout(frame, atr, previous_candle_time=None):
+    """Check recent newly closed candles so an 8-minute poll cannot miss a break."""
+    start = max(1, len(frame) - 12)
+    previous_time = pd.to_datetime(
+        previous_candle_time, utc=True, errors="coerce"
+    )
+    if isinstance(frame.index, pd.DatetimeIndex) and not pd.isna(previous_time):
+        new_positions = [
+            index for index, candle_time in enumerate(frame.index)
+            if candle_time > previous_time
+        ]
+        if new_positions:
+            start = max(start, new_positions[0])
+        else:
+            return None
+    else:
+        start = len(frame) - 1
+
+    for position in range(start, len(frame)):
+        segment = frame.iloc[:position + 1]
+        current_atr = _safe_float(segment.iloc[-1].get("atr"), atr)
+        breakout = _trendline_breakout(segment, current_atr)
+        if breakout:
+            breakout["candle_time"] = str(segment.index[-1])
+            return breakout
+    return None
 
 
 def _safe_float(value, default=None):
@@ -192,7 +238,9 @@ def classify_gold_market(frame, timeframe, previous_state=None):
         )
         breakout_watch = None
     else:
-        breakout = _trendline_breakout(data, atr)
+        breakout = _recent_trendline_breakout(
+            data, atr, previous_state.get("candle_time")
+        )
         if breakout:
             direction = breakout["direction"]
             condition = f"TRENDLINE BREAKOUT — {direction}"
@@ -205,6 +253,7 @@ def classify_gold_market(frame, timeframe, previous_state=None):
             breakout_watch = {
                 "direction": direction,
                 "level": breakout["level"],
+                "candle_time": breakout["candle_time"],
                 "age": 0,
             }
         else:
