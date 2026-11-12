@@ -1,6 +1,28 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import bot
+
+
+class MenuNavigationInputFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_menu_button_cancels_pending_account_risk_and_opens_menu(self):
+        context = SimpleNamespace(user_data={"account_risk_pending": True})
+        message = SimpleNamespace(
+            text="🔎 Market Scanner",
+            reply_text=AsyncMock(),
+        )
+        update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=123),
+        )
+
+        with patch("bot.show_market_scanner", new_callable=AsyncMock) as show:
+            await bot.handle_text(update, context)
+
+        show.assert_awaited_once_with(update, context)
+        self.assertNotIn("account_risk_pending", context.user_data)
+        message.reply_text.assert_awaited_once()
 
 
 class ManualStyleFlowKeyboardTests(unittest.TestCase):
