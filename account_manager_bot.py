@@ -283,15 +283,15 @@ async def handle_account_text(update, context):
             return True
         step = wizard["step"]
         prompts = {
-            "name": "Account nickname — send a name, for example: My Personal Account.",
-            "account_type": "Account type — choose PERSONAL, PROP_CHALLENGE, or FUNDED_PROP. You can also type Personal Account.",
-            "firm_name": "Prop firm — enter its name, or send - if not applicable.",
-            "starting_balance": "Starting balance — enter a number, for example 5000.",
-            "currency": "Currency — enter USD, EUR, GBP or NGN.",
-            "daily_loss_percent": "Daily loss limit — enter a percentage, or 0 if unknown/not applicable.",
-            "overall_loss_percent": "Overall maximum loss — enter a percentage, or 0 if unknown/not applicable.",
-            "profit_target_percent": "Profit target — enter a percentage, or 0 if unknown/not applicable.",
-            "drawdown_model": "Drawdown model — send STATIC or TRAILING. If unsure, use STATIC as a placeholder and verify the firm's rules.",
+            "name": "What name do you want to give this account? Example: My Personal Account.",
+            "account_type": "What type of account is this? Send PERSONAL, PROP_CHALLENGE, or FUNDED_PROP.",
+            "firm_name": "What is the name of the prop firm? Example: FTMO.",
+            "starting_balance": "What is the account's starting balance? Send the amount as a number. Example: 5000.",
+            "currency": "What currency does the account use? Send USD, EUR, GBP, or NGN.",
+            "daily_loss_percent": "What is the daily loss limit? Enter the percent you are allowed to lose in one day. Example: 5. Enter 0 if there is no daily limit.",
+            "overall_loss_percent": "What is the maximum total loss allowed? Enter the percent. Example: 10.",
+            "profit_target_percent": "What profit target must you reach? Enter the percent. Example: 8.",
+            "drawdown_model": "How does the firm's maximum loss limit work? Send STATIC or TRAILING. Check the firm's rules if you are not sure.",
         }
         try:
             if step not in prompts:
@@ -336,9 +336,9 @@ async def handle_account_text(update, context):
                 "currency": wizard["currency"],
                 "rules": {
                     "daily_loss_percent": wizard["daily_loss_percent"] or None,
-                    "overall_loss_percent": wizard["overall_loss_percent"] or None,
-                    "profit_target_percent": wizard["profit_target_percent"] or None,
-                    "drawdown_model": wizard["drawdown_model"],
+                    "overall_loss_percent": wizard.get("overall_loss_percent") or None,
+                    "profit_target_percent": wizard.get("profit_target_percent") or None,
+                    "drawdown_model": wizard.get("drawdown_model"),
                     "verified": False,
                 },
             })
