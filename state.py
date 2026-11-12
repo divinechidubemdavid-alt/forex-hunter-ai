@@ -123,13 +123,22 @@ def reserve_api_request(purpose='manual'):
         limit = int(TWELVE_DATA_DAILY_CREDIT_LIMIT)
         used = int(_state.get("api_requests", 0))
 
-        purpose = str(purpose).lower()
-        if purpose == "auto":
-            automatic_limit = max(0, limit - int(API_RESERVE_REQUESTS))
-            if used >= automatic_limit:
+        purpose = str(purpose).strip().lower()
+
+        # All unattended/background market-data jobs share one protected
+        # budget. This includes the automatic scanner, saved-signal monitor,
+        # and the planned Gold multi-timeframe monitor. Keep the reserved
+        # allowance available for user-requested manual analysis.
+        background_purposes = {"auto", "monitor", "gold_monitor"}
+        if purpose in background_purposes:
+            background_limit = max(
+                0,
+                limit - int(API_RESERVE_REQUESTS),
+            )
+            if used >= background_limit:
                 return False, (
-                    "Automatic scanner paused to protect the reserved "
-                    "daily API allowance for manual analysis and monitoring."
+                    "Background market monitoring paused to protect the "
+                    "reserved daily API allowance for manual analysis."
                 )
 
         if used >= limit:
