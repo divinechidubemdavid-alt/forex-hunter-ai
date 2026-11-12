@@ -11,6 +11,7 @@ from market_scope import get_session_markets
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
+from trading_styles import AUTOMATIC_TRADING_STYLE, style_label
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,10 @@ def _eligible_markets(now):
             if market in allowed
         )
 
+    # Bitcoin trades continuously and remains eligible on weekdays too.
+    if BITCOIN in allowed:
+        markets.append(BITCOIN)
+
     return markets
 
 
@@ -107,6 +112,8 @@ def _markets_for_cycle(now):
     if GOLD in eligible:
         ordered.append(GOLD)
     ordered.extend(market for market in forex_order if market in eligible)
+    if BITCOIN in eligible:
+        ordered.append(BITCOIN)
     return ordered
 
 
@@ -137,17 +144,21 @@ def _signal_key(symbol, result):
 
     return (
         f"adaptive-signal:{symbol}:{SCAN_TIMEFRAME}:"
-        f"{direction}:{candle_time}"
+        f"{direction}:{candle_time}:{AUTOMATIC_TRADING_STYLE}"
     )
 
 
 async def _send_signal(app, symbol, result):
     """Publish an opportunity without silently adding it to user tracking."""
+    result["trading_style"] = AUTOMATIC_TRADING_STYLE
+    result["style_label"] = style_label(AUTOMATIC_TRADING_STYLE)
     message = format_signal(symbol, result)
     raw_targets = result.get("take_profits") or []
     targets = list(raw_targets) if isinstance(raw_targets, (list, tuple)) else [raw_targets]
     signal_record = {
         "symbol": symbol,
+        "trading_style": AUTOMATIC_TRADING_STYLE,
+        "style_label": style_label(AUTOMATIC_TRADING_STYLE),
         "direction": result.get("status") or result.get("direction"),
         "timeframe": result.get("timeframe") or SCAN_TIMEFRAME,
         "entry": result.get("entry"),
@@ -173,6 +184,7 @@ async def _send_signal(app, symbol, result):
             take_profits=targets,
             strategy=result.get("strategy"),
             signal_stage=result.get("signal_stage"),
+            trading_style=AUTOMATIC_TRADING_STYLE,
         )
     except Exception:
         logger.exception("Could not create chart for %s.", symbol)
@@ -260,7 +272,7 @@ async def _scan_market(app, symbol):
     try:
         frame = await fetch_candles(
             MARKETS[symbol],
-            outputsize=500,
+            outputsize=1500,
             interval="15m",
             purpose="auto",
         )
@@ -268,6 +280,7 @@ async def _scan_market(app, symbol):
         result = analyze(
             frame,
             SCAN_TIMEFRAME,
+            trading_style=AUTOMATIC_TRADING_STYLE,
         )
 
         result["symbol"] = symbol
