@@ -528,7 +528,7 @@ async def _check_one_price(app, user_id, signal, quote):
                 )],
             ])
         message = (
-            f"🎯 {signal.get('symbol', 'Signal')}: TP{number} reached. "
+            f"🎯 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: TP{number} reached. "
             f"Live quote: {price:g}. One-third partial exit recorded. "
             f"Realised result: {realised:+.2f}R."
         )
