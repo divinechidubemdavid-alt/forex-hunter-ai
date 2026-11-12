@@ -14,6 +14,9 @@ STYLE_CONFIGS = {
             "5m": ("15m", "30m"),
         },
         "has_trade_levels": False,
+        "score_weights": {"adx": 10, "ema": 10, "rsi": 20, "candle": 20, "setup": 15, "volatility": 10, "directional": 15},
+        "minimum_score": 72,
+        "minimum_adx": 15.0,
     },
     "DAY": {
         "label": "DAY TRADE",
@@ -23,6 +26,9 @@ STYLE_CONFIGS = {
             "30m": ("1h", "4h"),
         },
         "has_trade_levels": True,
+        "score_weights": {"adx": 20, "ema": 15, "rsi": 10, "candle": 10, "setup": 20, "volatility": 10, "directional": 15},
+        "minimum_score": 70,
+        "minimum_adx": 20.0,
     },
     "SWING": {
         "label": "SWING TRADE",
@@ -33,6 +39,9 @@ STYLE_CONFIGS = {
             "1day": ("1week",),
         },
         "has_trade_levels": True,
+        "score_weights": {"adx": 25, "ema": 20, "rsi": 10, "candle": 10, "setup": 15, "volatility": 5, "directional": 15},
+        "minimum_score": 75,
+        "minimum_adx": 22.0,
     },
 }
 
@@ -85,3 +94,15 @@ def is_automatic_style(style):
 
 def is_strong_signal_style(style):
     return normalise_trading_style(style) == STRONG_SIGNALS_TRADING_STYLE
+
+
+def style_score_profile(style):
+    return dict(STYLE_CONFIGS[normalise_trading_style(style)]["score_weights"])
+
+
+def style_minimum_score(style):
+    return int(STYLE_CONFIGS[normalise_trading_style(style)]["minimum_score"])
+
+
+def style_minimum_adx(style):
+    return float(STYLE_CONFIGS[normalise_trading_style(style)]["minimum_adx"])
