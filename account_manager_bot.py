@@ -17,6 +17,8 @@ from account_manager import (
     calculate_account_trade_plan,
     render_account_report,
     render_account_action_report,
+    normalise_account_type,
+    account_registration_steps,
 )
 
 MENU_LABEL = "🛡 Account Manager"
@@ -275,51 +277,50 @@ async def handle_account_text(update, context):
     if wizard:
         step = wizard["step"]
         prompts = {
-            "name": ("name", "2/9 — Which account type? Send PROP_CHALLENGE, FUNDED_PROP, or PERSONAL."),
-            "drawdown_model": ("drawdown_model", "Send STATIC or TRAILING."),
-            "account_type": ("account_type", "3/9 — Enter the prop-firm name, or send - for a personal account."),
-            "firm_name": ("firm_name", "4/9 — Enter starting account balance, for example 5000."),
-            "starting_balance": ("starting_balance", "5/9 — Enter account currency: USD, EUR, GBP or NGN."),
-            "currency": ("currency", "6/9 — Daily loss limit as a percentage, or 0 if not applicable. Do not guess; use 0 if unknown."),
-            "daily_loss_percent": ("daily_loss_percent", "7/9 — Overall maximum loss percentage, or 0 if unknown."),
-            "overall_loss_percent": ("overall_loss_percent", "8/9 — Profit target percentage, or 0 if not applicable/unknown."),
-            "profit_target_percent": ("profit_target_percent", "9/9 — Drawdown model: STATIC or TRAILING. If unknown, choose STATIC only as a placeholder and verify before trading."),
+            "name": "1/9 — Send an account nickname, for example: My Personal Account.",
+            "account_type": "2/9 — Choose account type: PERSONAL, PROP_CHALLENGE, or FUNDED_PROP. You can also type Personal Account.",
+            "firm_name": "3/9 — Enter the prop-firm name, or send - if not applicable.",
+            "starting_balance": "4/9 — Enter starting balance as a number, for example 5000.",
+            "currency": "5/9 — Enter currency: USD, EUR, GBP or NGN.",
+            "daily_loss_percent": "6/9 — Daily loss limit percentage, or 0 if unknown/not applicable.",
+            "overall_loss_percent": "7/9 — Overall maximum loss percentage, or 0 if unknown/not applicable.",
+            "profit_target_percent": "8/9 — Profit target percentage, or 0 if unknown/not applicable.",
+            "drawdown_model": "9/9 — Drawdown model: STATIC or TRAILING. If unsure, use STATIC as a placeholder and verify the firm's rules.",
         }
         try:
-            key, prompt = prompts[step]
-            if step == "account_type":
-                value = text.upper()
-                if value not in {"PROP_CHALLENGE", "FUNDED_PROP", "PERSONAL"}:
-                    raise ValueError("Send PROP_CHALLENGE, FUNDED_PROP, or PERSONAL.")
+            if step not in prompts:
+                raise ValueError("Registration step is invalid. Please cancel and start again.")
+            if step == "name":
+                value = text.strip()
+            elif step == "account_type":
+                value = normalise_account_type(text)
             elif step == "starting_balance":
-                value = float(text.replace(",", ""))
+                value = float(text.replace(",", "").strip())
                 if value <= 0:
                     raise ValueError("Starting balance must be greater than zero.")
             elif step in {"daily_loss_percent", "overall_loss_percent", "profit_target_percent"}:
-                value = float(text.replace("%", ""))
+                value = float(text.replace("%", "").strip())
                 if not 0 <= value <= 100:
                     raise ValueError("Enter a percentage from 0 to 100, or 0 if unknown.")
             elif step == "currency":
-                value = text.upper()
+                value = text.upper().strip()
                 if value not in {"USD", "EUR", "GBP", "NGN"}:
                     raise ValueError("Use USD, EUR, GBP or NGN.")
-            elif step == "firm_name" and text == "-":
+            elif step == "firm_name" and text.strip() == "-":
                 value = ""
             elif step == "drawdown_model":
-                value = text.upper()
+                value = text.upper().strip()
                 if value not in {"STATIC", "TRAILING"}:
                     raise ValueError("Send STATIC or TRAILING.")
             else:
-                value = text
+                value = text.strip()
             wizard[key] = value
-            sequence = ["name", "account_type", "firm_name", "starting_balance", "currency", "daily_loss_percent", "overall_loss_percent", "profit_target_percent", "drawdown_model"]
+            sequence = account_registration_steps(wizard.get("account_type"))
             next_index = sequence.index(step) + 1
             if next_index < len(sequence):
-                wizard["step"] = sequence[next_index]
-                if sequence[next_index] == "drawdown_model":
-                    await update.message.reply_text(prompt)
-                else:
-                    await update.message.reply_text(prompts[sequence[next_index]][1])
+                next_step = sequence[next_index]
+                wizard["step"] = next_step
+                await update.message.reply_text(prompts[next_step])
                 return True
             profile = create_profile(user_id, {
                 "name": wizard["name"],
