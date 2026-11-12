@@ -997,10 +997,22 @@ async def analyse_market(update, context, symbol, timeframe, trading_style="DAY"
             f"manual-{user_id}-"
             f"{int(datetime.now().timestamp())}"
         )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"track:{signal_id}")],
-            [InlineKeyboardButton("🧮 CALCULATE POSITION SIZE", callback_data=f"account:plan-manual:{signal_id}")],
-        ])
+        keyboard_rows = [[
+            InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"track:{signal_id}")
+        ]]
+        if (
+            style_has_trade_levels(trading_style)
+            and result.get("entry") is not None
+            and result.get("stop_loss") is not None
+            and len(result.get("take_profits") or []) == 3
+        ):
+            keyboard_rows.append([
+                InlineKeyboardButton(
+                    "🧮 CALCULATE POSITION SIZE",
+                    callback_data=f"account:plan-manual:{signal_id}",
+                )
+            ])
+        keyboard = InlineKeyboardMarkup(keyboard_rows)
         context.user_data[signal_id] = {
             "symbol": symbol,
             "trading_style": trading_style,
