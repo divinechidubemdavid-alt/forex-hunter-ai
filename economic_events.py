@@ -216,9 +216,8 @@ def directional_analysis(event, technical=None, phase="pre-event"):
         direction = fundamental_direction
     combined_direction = direction
     pairs = {
-        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "XAU/USD"],
+        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"],
         "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
-        "AUD": ["AUD/USD"], "CAD": ["USD/CAD"], "CHF": ["USD/CHF"],
     }.get(currency, [])
     # Economic-event directional outputs follow the weekday trading universe.
     # BTC/USD is reserved for weekend trading and retired pairs are excluded.
