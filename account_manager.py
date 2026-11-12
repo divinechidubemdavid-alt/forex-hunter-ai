@@ -36,6 +36,8 @@ def normalise_account_type(value):
         "FUNDED_PROP": "FUNDED_PROP",
         "FUNDED PROP": "FUNDED_PROP",
         "FUNDED ACCOUNT": "FUNDED_PROP",
+        "INSTANT FUNDING": "FUNDED_PROP",
+        "PROP FIRM INSTANT FUNDING": "FUNDED_PROP",
     }
     try:
         return aliases[text]
@@ -44,11 +46,13 @@ def normalise_account_type(value):
 
 
 def account_registration_steps(account_type=None):
-    """Return the correct wizard order; personal accounts skip firm name."""
+    """Return registration questions that match the selected account type."""
     steps = ["name", "account_type"]
-    if account_type != "PERSONAL":
-        steps.append("firm_name")
+    if account_type == "PERSONAL":
+        steps.extend(["starting_balance", "currency", "daily_loss_percent"])
+        return steps
     steps.extend([
+        "firm_name",
         "starting_balance",
         "currency",
         "daily_loss_percent",
@@ -71,25 +75,33 @@ def validate_profile(profile):
     if currency not in CURRENCIES:
         raise ValueError("Supported currencies: USD, EUR, GBP and NGN.")
     rules = dict(profile.get("rules") or {})
-    for key, label in (
-        ("daily_loss_percent", "Daily loss percentage"),
-        ("overall_loss_percent", "Overall loss percentage"),
-        ("profit_target_percent", "Profit target percentage"),
-    ):
+    rule_fields = [("daily_loss_percent", "Daily loss percentage")]
+    if account_type != "PERSONAL":
+        rule_fields.extend([
+            ("overall_loss_percent", "Maximum total loss percentage"),
+            ("profit_target_percent", "Profit target percentage"),
+        ])
+    for key, label in rule_fields:
         value = rules.get(key)
         if value not in (None, ""):
             rules[key] = _number(value, label, 0, 100)
         else:
             rules[key] = None
-    model = str(rules.get("drawdown_model", "STATIC")).upper()
-    if model not in DRAWDOWN_MODELS:
-        raise ValueError("Drawdown model must be STATIC or TRAILING.")
-    rules["drawdown_model"] = model
+    if account_type == "PERSONAL":
+        # Personal accounts do not have prop-firm drawdown or profit-target rules.
+        rules["overall_loss_percent"] = None
+        rules["profit_target_percent"] = None
+        rules["drawdown_model"] = None
+    else:
+        model = str(rules.get("drawdown_model", "STATIC")).upper()
+        if model not in DRAWDOWN_MODELS:
+            raise ValueError("Drawdown type must be STATIC or TRAILING.")
+        rules["drawdown_model"] = model
     rules["verified"] = bool(rules.get("verified", False))
     return {
         "name": name,
         "account_type": account_type,
-        "firm_name": str(profile.get("firm_name", "")).strip()[:80],
+        "firm_name": "" if account_type == "PERSONAL" else str(profile.get("firm_name", "")).strip()[:80],
         "starting_balance": balance,
         "currency": currency,
         "rules": rules,
@@ -167,7 +179,7 @@ def calculate_position_size(account_equity, risk_percent, stop_distance, value_p
     return {"risk_amount": risk_amount, "risk_percent": risk_pct, "stop_distance": distance, "lots": lots}
 
 
-def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_unit_per_lot):
+def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_unit_per_lot, positions_count=1):
     """Combine a qualified strategy setup with account-based position sizing.
 
     The supplied unit value must be verified from the user's broker contract
@@ -200,9 +212,23 @@ def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_u
         equity_source = "starting balance (no manual equity snapshot)"
     else:
         equity_source = "latest manually saved equity snapshot"
+    if isinstance(positions_count, bool):
+        raise ValueError("Number of positions must be a whole number from 1 to 20.")
+    try:
+        numeric_count = float(positions_count)
+    except (TypeError, ValueError):
+        raise ValueError("Number of positions must be a whole number from 1 to 20.")
+    if not numeric_count.is_integer() or not 1 <= numeric_count <= 20:
+        raise ValueError("Number of positions must be a whole number from 1 to 20.")
+    positions_count = int(numeric_count)
+
+    # Risk is set once for the entire signal. Positions share it; they do not
+    # multiply the user's total risk.
     sizing = calculate_position_size(
         equity, risk_percent, risk_distance, value_per_price_unit_per_lot
     )
+    per_position_risk = sizing["risk_amount"] / positions_count
+    per_position_lots = sizing["lots"] / positions_count
     return {
         "symbol": trade.get("symbol"),
         "timeframe": trade.get("timeframe"),
@@ -215,6 +241,9 @@ def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_u
         "equity_source": equity_source,
         "currency": profile.get("currency", "USD"),
         "account_name": profile.get("name", "Active account"),
+        "positions_count": positions_count,
+        "per_position_risk_amount": per_position_risk,
+        "per_position_lots": per_position_lots,
         **sizing,
     }
 

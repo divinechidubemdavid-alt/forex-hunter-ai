@@ -24,6 +24,67 @@ from account_manager import (
 MENU_LABEL = "🛡 Account Manager"
 
 
+async def _begin_signal_position_plan(message, context, user_id, trade):
+    """Start account-aware sizing from a qualified signal; this never places orders."""
+    active = state.get_active_account(user_id)
+    if not active:
+        await message.reply_text(
+            "Register and select an account in Account Manager before calculating a position plan."
+        )
+        return
+    if str(trade.get("status", "")).upper() not in {"BUY", "SELL"}:
+        await message.reply_text("This signal has no qualified BUY or SELL direction.")
+        return
+    targets = trade.get("take_profits") or []
+    if len(targets) != 3 or trade.get("entry") is None or trade.get("stop_loss") is None:
+        await message.reply_text("This signal does not contain complete entry, stop-loss and TP1–TP3 levels for sizing.")
+        return
+
+    snapshot = active.get("snapshot") or {}
+    equity = snapshot.get("equity")
+    equity_source = "manual equity snapshot" if equity is not None else "starting balance (no snapshot)"
+    if snapshot.get("updated_at"):
+        try:
+            updated = datetime.fromisoformat(str(snapshot["updated_at"]).replace("Z", "+00:00"))
+            age_hours = (datetime.now(ZoneInfo("UTC")) - updated).total_seconds() / 3600
+            if age_hours > 24:
+                await message.reply_text(
+                    f"Your saved equity snapshot is {age_hours:.1f} hours old. Update balance and equity before sizing this signal."
+                )
+                return
+        except (TypeError, ValueError):
+            await message.reply_text("Your saved equity timestamp is invalid. Update balance and equity before sizing.")
+            return
+
+    settings = state.get_user_settings(user_id)
+    try:
+        risk_pct = float(settings.get("risk_percent", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        risk_pct = 1.0
+    risk_note = f"Risk preference: {risk_pct:g}%."
+    if risk_pct > 5.0:
+        risk_pct = 5.0
+        risk_note = "Your saved risk preference is above the planner's 5% safety ceiling; this plan is capped at 5%."
+
+    context.user_data["account_plan_pending"] = {
+        "trade": trade,
+        "account_id": active["id"],
+        "risk_percent": risk_pct,
+        "equity": float(equity if equity is not None else active["starting_balance"]),
+        "equity_source": equity_source,
+        "risk_note": risk_note,
+        "awaiting_positions_count": True,
+    }
+    await message.reply_text(
+        f"ACCOUNT-AWARE PLAN — {trade.get('symbol', 'Market')} {trade['status']}\n"
+        f"Account: {active['name']}\n"
+        f"Risk budget: {risk_pct:g}% of equity for the entire signal.\n\n"
+        "How many separate positions do you want to open for this one signal? "
+        "Send a whole number from 1 to 20. The total risk will be shared across all positions, not multiplied.\n"
+        "This is a sizing plan only. It will not place an order."
+    )
+
+
 def _home_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Register account", callback_data="account:register")],
@@ -70,7 +131,15 @@ async def handle_account_callback(update, context):
     user_id = update.effective_user.id
     action = data.split(":", 1)[1]
 
-    if action == "register":
+    if action.startswith("drawdown:"):
+        wizard = context.user_data.get("account_wizard")
+        model = action.split(":", 1)[1].upper()
+        if not wizard or wizard.get("step") != "drawdown_model" or model not in {"STATIC", "TRAILING"}:
+            await query.message.reply_text("This registration choice has expired. Please start registration again.")
+            return True
+        wizard["drawdown_model"] = model
+        await _save_registered_account(query.message, context, user_id, wizard)
+    elif action == "register":
         context.user_data["account_wizard"] = {"step": "name"}
         await query.message.reply_photo(
             photo=render_account_action_report("Register Trading Account", "Set up a prop challenge, funded or personal account"),
@@ -156,6 +225,39 @@ async def handle_account_callback(update, context):
                 await query.message.reply_photo(photo=image, caption=f"📈 {symbol} | {timeframe.upper()}\nLast completed candle: {candles.index[-1]}\nMarket structure annotations included. Verify broker prices before trading.")
             except (MarketDataError, ValueError) as exc:
                 await query.message.reply_text(f"Chart unavailable: {exc}")
+    elif action.startswith("plan-manual:"):
+        signal_key = action.split(":", 1)[1]
+        signal = context.user_data.get(signal_key)
+        if not signal:
+            await query.message.reply_text("This signal is no longer available. Run the analysis again.")
+        else:
+            trade = {
+                "status": signal.get("direction"),
+                "symbol": signal.get("symbol"),
+                "timeframe": signal.get("timeframe"),
+                "entry": signal.get("entry"),
+                "stop_loss": signal.get("stop_loss"),
+                "take_profits": signal.get("take_profits"),
+            }
+            await _begin_signal_position_plan(query.message, context, user_id, trade)
+    elif action.startswith("plan-opportunity:"):
+        opportunity_id = action.split(":", 1)[1]
+        item = state.get_opportunity(opportunity_id)
+        if not item:
+            await query.message.reply_text("This opportunity is no longer available.")
+        else:
+            targets = item.get("take_profits") or [
+                item.get("tp1"), item.get("tp2"), item.get("tp3")
+            ]
+            trade = {
+                "status": item.get("direction"),
+                "symbol": item.get("symbol"),
+                "timeframe": item.get("timeframe", "15m"),
+                "entry": item.get("entry"),
+                "stop_loss": item.get("stop_loss"),
+                "take_profits": targets,
+            }
+            await _begin_signal_position_plan(query.message, context, user_id, trade)
     elif action == "planner":
         active = state.get_active_account(user_id)
         if not active:
@@ -241,6 +343,7 @@ async def handle_account_callback(update, context):
                     "equity": float(equity if equity is not None else active["starting_balance"]),
                     "equity_source": equity_source,
                     "risk_note": risk_note,
+                    "awaiting_positions_count": True,
                 }
                 await query.message.reply_photo(
                     photo=image,
@@ -249,8 +352,9 @@ async def handle_account_callback(update, context):
                         f"Active account: {active['name']}\n"
                         f"Sizing equity: {float(equity if equity is not None else active['starting_balance']):,.2f} {active['currency']} ({equity_source})\n"
                         f"{risk_note}\n\n"
-                        "FINAL INPUT REQUIRED: Send the broker-verified monetary value of a 1.0-lot position for a 1.0 price-unit move, in this account currency.\n"
-                        "Send only the value verified for this exact symbol and account currency. Do not use a generic example or assume a value. No order will be placed."
+                        "How many separate positions do you want to open for this one signal? Send a whole number from 1 to 20. "
+                        "The total risk budget will be shared across all positions; choosing more positions will not increase total risk.\n"
+                        "After that, the planner will ask for the broker-verified monetary value needed for sizing. This planner does not place orders."
                     ),
                 )
             except (MarketDataError, ValueError, KeyError) as exc:
@@ -269,6 +373,39 @@ async def handle_account_callback(update, context):
     return True
 
 
+async def _save_registered_account(message, context, user_id, wizard):
+    profile = create_profile(user_id, {
+        "name": wizard["name"],
+        "account_type": wizard["account_type"],
+        "firm_name": wizard.get("firm_name", ""),
+        "starting_balance": wizard["starting_balance"],
+        "currency": wizard["currency"],
+        "rules": {
+            "daily_loss_percent": wizard["daily_loss_percent"] or None,
+            "overall_loss_percent": wizard.get("overall_loss_percent") or None,
+            "profit_target_percent": wizard.get("profit_target_percent") or None,
+            "drawdown_model": wizard.get("drawdown_model"),
+            "verified": False,
+        },
+    })
+    state.add_account_profile(user_id, profile)
+    context.user_data.pop("account_wizard", None)
+    await message.reply_photo(
+        photo=render_account_action_report(
+            "Account Registered",
+            "Rules remain unverified until checked against the firm's current rulebook",
+            {"Starting balance": profile["starting_balance"]}
+        ),
+        caption=(
+            f"✅ Account registered: {profile['name']}\n"
+            f"Type: {profile['account_type']}\n"
+            f"Starting balance: {profile['starting_balance']} {profile['currency']}\n"
+            "Rules are marked UNVERIFIED. Check your firm's official dashboard/rulebook before relying on them."
+        ),
+        reply_markup=_home_keyboard(),
+    )
+
+
 async def handle_account_text(update, context):
     text = (update.message.text or "").strip()
     user_id = update.effective_user.id
@@ -283,15 +420,15 @@ async def handle_account_text(update, context):
             return True
         step = wizard["step"]
         prompts = {
-            "name": "Account nickname — send a name, for example: My Personal Account.",
-            "account_type": "Account type — choose PERSONAL, PROP_CHALLENGE, or FUNDED_PROP. You can also type Personal Account.",
-            "firm_name": "Prop firm — enter its name, or send - if not applicable.",
-            "starting_balance": "Starting balance — enter a number, for example 5000.",
-            "currency": "Currency — enter USD, EUR, GBP or NGN.",
-            "daily_loss_percent": "Daily loss limit — enter a percentage, or 0 if unknown/not applicable.",
-            "overall_loss_percent": "Overall maximum loss — enter a percentage, or 0 if unknown/not applicable.",
-            "profit_target_percent": "Profit target — enter a percentage, or 0 if unknown/not applicable.",
-            "drawdown_model": "Drawdown model — send STATIC or TRAILING. If unsure, use STATIC as a placeholder and verify the firm's rules.",
+            "name": "What name do you want to give this account? Example: My Personal Account.",
+            "account_type": "What type of account is this? Send PERSONAL, PROP_CHALLENGE, or FUNDED_PROP (instant funding).",
+            "firm_name": "What is the name of the prop firm? Example: FTMO.",
+            "starting_balance": "What is the account's starting balance? Send the amount as a number. Example: 5000.",
+            "currency": "What currency does the account use? Send USD, EUR, GBP, or NGN.",
+            "daily_loss_percent": "What is the daily loss limit? Enter the percent you are allowed to lose in one day. Example: 5. Enter 0 if there is no daily limit.",
+            "overall_loss_percent": "What is the maximum total loss allowed? Enter the percent. Example: 10.",
+            "profit_target_percent": "What profit target must you reach? Enter the percent. Example: 8.",
+            "drawdown_model": "Choose the drawdown rule shown in your prop firm's official rules. Static: the loss limit stays fixed. Trailing: the loss limit can move up as your account reaches new highs. Firms calculate this differently, so check your rulebook if you are unsure.",
         }
         try:
             if step not in prompts:
@@ -326,38 +463,16 @@ async def handle_account_text(update, context):
             if next_index < len(sequence):
                 next_step = sequence[next_index]
                 wizard["step"] = next_step
-                await update.message.reply_text(prompts[next_step])
+                if next_step == "drawdown_model":
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Static — fixed loss limit", callback_data="account:drawdown:STATIC")],
+                        [InlineKeyboardButton("Trailing — limit can move up", callback_data="account:drawdown:TRAILING")],
+                    ])
+                    await update.message.reply_text(prompts[next_step], reply_markup=keyboard)
+                else:
+                    await update.message.reply_text(prompts[next_step])
                 return True
-            profile = create_profile(user_id, {
-                "name": wizard["name"],
-                "account_type": wizard["account_type"],
-                "firm_name": wizard.get("firm_name", ""),
-                "starting_balance": wizard["starting_balance"],
-                "currency": wizard["currency"],
-                "rules": {
-                    "daily_loss_percent": wizard["daily_loss_percent"] or None,
-                    "overall_loss_percent": wizard["overall_loss_percent"] or None,
-                    "profit_target_percent": wizard["profit_target_percent"] or None,
-                    "drawdown_model": wizard["drawdown_model"],
-                    "verified": False,
-                },
-            })
-            state.add_account_profile(user_id, profile)
-            context.user_data.pop("account_wizard", None)
-            await update.message.reply_photo(
-                photo=render_account_action_report(
-                    "Account Registered",
-                    "Rules remain unverified until checked against the firm's current rulebook",
-                    {"Starting balance": profile["starting_balance"]}
-                ),
-                caption=(
-                    f"✅ Account registered: {profile['name']}\n"
-                    f"Type: {profile['account_type']}\n"
-                    f"Starting balance: {profile['starting_balance']} {profile['currency']}\n"
-                    "Rules are marked UNVERIFIED. Check your firm's official dashboard/rulebook before relying on them."
-                ),
-                reply_markup=_home_keyboard(),
-            )
+            await _save_registered_account(update.message, context, user_id, wizard)
             return True
         except (ValueError, KeyError) as exc:
             await update.message.reply_text(f"{exc}\nPlease try again.")
@@ -403,8 +518,22 @@ async def handle_account_text(update, context):
             await update.message.reply_text("Account-aware trade plan cancelled.", reply_markup=_home_keyboard())
             return True
         try:
-            unit_value = float(text.replace(",", "").strip())
             pending = context.user_data["account_plan_pending"]
+            if pending.get("awaiting_positions_count"):
+                if not text.isdigit():
+                    raise ValueError("Enter a whole number from 1 to 20.")
+                positions_count = int(text)
+                if not 1 <= positions_count <= 20:
+                    raise ValueError("Choose between 1 and 20 positions.")
+                pending["positions_count"] = positions_count
+                pending["awaiting_positions_count"] = False
+                await update.message.reply_text(
+                    f"Number of positions: {positions_count}. Total risk remains {pending['risk_percent']:g}% across all positions.\n\n"
+                    "Now send the broker-verified monetary value of a 1.0-lot position for a 1.0 price-unit move, in this account currency. "
+                    "Use the value for this exact symbol and account currency. Do not guess it, or send cancel."
+                )
+                return True
+            unit_value = float(text.replace(",", "").strip())
             profile = state.get_account_profile(user_id, pending["account_id"])
             if not profile or not profile.get("active"):
                 raise ValueError("Your active account changed or is unavailable. Start the planner again.")
@@ -417,7 +546,8 @@ async def handle_account_text(update, context):
             else:
                 profile_for_plan["snapshot"]["equity"] = pending["equity"]
             plan = calculate_account_trade_plan(
-                profile_for_plan, trade, pending["risk_percent"], unit_value
+                profile_for_plan, trade, pending["risk_percent"], unit_value,
+                positions_count=pending.get("positions_count", 1),
             )
             context.user_data.pop("account_plan_pending", None)
             report = render_account_action_report(
@@ -438,8 +568,13 @@ async def handle_account_text(update, context):
                     f"TP1: {plan['take_profits'][0]}\nTP2: {plan['take_profits'][1]}\nTP3: {plan['take_profits'][2]}\n"
                     f"Stop distance: {plan['risk_distance']}\n"
                     f"Verified unit value entered: {unit_value:g} {plan['currency']} per price unit per 1.0 lot\n"
-                    f"THEORETICAL volume: {plan['lots']:.4f} lots\n\n"
-                    "Before trading, verify tick size/value, contract size, account-currency conversion, lot step, minimum/maximum volume and commission. Round volume DOWN to your broker's permitted lot step. This is not a broker fill or order instruction."
+                    f"Number of positions: {plan['positions_count']}\n"
+                    f"Total theoretical volume: {plan['lots']:.4f} lots\n"
+                    f"Theoretical volume per position: {plan['per_position_lots']:.4f} lots\n"
+                    f"Risk per position (before rounding/costs): {plan['per_position_risk_amount']:,.2f} {plan['currency']}\n\n"
+                    "All positions use the same signal entry, technical stop loss and original TP1–TP3 plan. "
+                    "Total risk is shared, not multiplied. Before trading, verify tick size/value, contract size, account-currency conversion, lot step, minimum/maximum volume and commission. "
+                    "Round each volume DOWN to your broker's permitted lot step and recheck aggregate risk. Calculation only: no MT5 connection or order is placed."
                 ),
                 reply_markup=_home_keyboard(),
             )

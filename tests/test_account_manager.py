@@ -107,15 +107,62 @@ class AccountManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             calculate_position_size(5000, 6, 2.5, 10)
 
+    def test_personal_profile_does_not_retain_prop_firm_name(self):
+        profile = create_profile("123", {
+            "name": "Personal",
+            "account_type": "PERSONAL",
+            "firm_name": "Should not be stored",
+            "starting_balance": 1000,
+            "currency": "USD",
+            "rules": {"daily_loss_percent": 2},
+        })
+        self.assertEqual(profile["firm_name"], "")
+
+    def test_position_count_splits_total_risk_and_lots(self):
+        trade = {
+            "status": "BUY",
+            "symbol": "EUR/USD",
+            "timeframe": "15m",
+            "entry": 1.1000,
+            "stop_loss": 1.0950,
+            "take_profits": [1.1050, 1.1100, 1.1150],
+        }
+        plan = calculate_account_trade_plan(self.profile, trade, 1, 10000, positions_count=4)
+        self.assertEqual(plan["positions_count"], 4)
+        self.assertAlmostEqual(plan["risk_amount"], 50)
+        self.assertAlmostEqual(plan["per_position_risk_amount"], 12.5)
+        self.assertAlmostEqual(plan["lots"], 1)
+        self.assertAlmostEqual(plan["per_position_lots"], 0.25)
+        self.assertEqual(plan["stop_loss"], trade["stop_loss"])
+        self.assertEqual(plan["take_profits"], trade["take_profits"])
+
+    def test_position_count_must_be_whole_number_between_one_and_twenty(self):
+        trade = {
+            "status": "BUY",
+            "symbol": "EUR/USD",
+            "timeframe": "15m",
+            "entry": 1.1000,
+            "stop_loss": 1.0950,
+            "take_profits": [1.1050, 1.1100, 1.1150],
+        }
+        for count in (0, 21, 1.5, "many", True):
+            with self.subTest(count=count):
+                with self.assertRaises(ValueError):
+                    calculate_account_trade_plan(self.profile, trade, 1, 10000, positions_count=count)
+
     def test_invalid_drawdown_model_is_rejected(self):
         with self.assertRaises(ValueError):
             create_profile("123", {
                 "name": "Bad Account",
-                "account_type": "PERSONAL",
+                "account_type": "PROP_CHALLENGE",
                 "starting_balance": 1000,
                 "currency": "USD",
                 "rules": {"drawdown_model": "UNKNOWN"},
             })
+
+    def test_account_type_accepts_instant_funding_label(self):
+        from account_manager import normalise_account_type
+        self.assertEqual(normalise_account_type("Instant Funding"), "FUNDED_PROP")
 
     def test_account_type_accepts_personal_account_label(self):
         from account_manager import normalise_account_type
@@ -126,6 +173,48 @@ class AccountManagerTests(unittest.TestCase):
         steps = account_registration_steps("PERSONAL")
         self.assertEqual(steps[:3], ["name", "account_type", "starting_balance"])
         self.assertIn("currency", steps)
+
+
+    def test_personal_account_registration_only_asks_for_daily_loss(self):
+        from account_manager import account_registration_steps
+        self.assertEqual(
+            account_registration_steps("PERSONAL"),
+            ["name", "account_type", "starting_balance", "currency", "daily_loss_percent"],
+        )
+
+    def test_prop_challenge_registration_asks_for_all_firm_limits(self):
+        from account_manager import account_registration_steps
+        self.assertEqual(
+            account_registration_steps("PROP_CHALLENGE"),
+            ["name", "account_type", "firm_name", "starting_balance", "currency",
+             "daily_loss_percent", "overall_loss_percent", "profit_target_percent", "drawdown_model"],
+        )
+
+    def test_instant_funding_registration_asks_for_all_firm_limits(self):
+        from account_manager import account_registration_steps
+        self.assertEqual(
+            account_registration_steps("FUNDED_PROP"),
+            ["name", "account_type", "firm_name", "starting_balance", "currency",
+             "daily_loss_percent", "overall_loss_percent", "profit_target_percent", "drawdown_model"],
+        )
+
+    def test_personal_profile_does_not_keep_prop_firm_limits(self):
+        profile = create_profile("123", {
+            "name": "Personal Trading",
+            "account_type": "PERSONAL",
+            "starting_balance": 1000,
+            "currency": "USD",
+            "rules": {
+                "daily_loss_percent": 3,
+                "overall_loss_percent": 10,
+                "profit_target_percent": 8,
+                "drawdown_model": "TRAILING",
+            },
+        })
+        self.assertEqual(profile["rules"]["daily_loss_percent"], 3)
+        self.assertIsNone(profile["rules"]["overall_loss_percent"])
+        self.assertIsNone(profile["rules"]["profit_target_percent"])
+        self.assertIsNone(profile["rules"]["drawdown_model"])
 
     def test_registration_sequence_keeps_firm_name_for_prop_accounts(self):
         from account_manager import account_registration_steps

@@ -202,12 +202,16 @@ async def _send_signal(app, symbol, result):
         if state.get_last_alert(delivery_key):
             continue
         try:
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton(
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(
                     "📌 TRACK THIS SIGNAL",
                     callback_data=f"optrack:{opportunity['id']}",
-                )
-            ]])
+                )],
+                [InlineKeyboardButton(
+                    "🧮 CALCULATE POSITION SIZE",
+                    callback_data=f"account:plan-opportunity:{opportunity['id']}",
+                )],
+            ])
             if chart is not None:
                 chart.seek(0)
                 await app.bot.send_photo(
