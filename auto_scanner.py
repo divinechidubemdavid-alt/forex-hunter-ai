@@ -171,6 +171,8 @@ async def _send_signal(app, symbol, result):
             entry=result.get("entry"),
             stop_loss=result.get("stop_loss"),
             take_profits=targets,
+            strategy=result.get("strategy"),
+            signal_stage=result.get("signal_stage"),
         )
     except Exception:
         logger.exception("Could not create chart for %s.", symbol)

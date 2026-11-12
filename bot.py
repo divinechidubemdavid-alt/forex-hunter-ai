@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 WAT = ZoneInfo("Africa/Lagos")
 
+# Keep freshly scanned indicator charts in memory alongside the 15-minute snapshot.
+STRONG_SIGNAL_CHARTS = {}
+
 MENU = ReplyKeyboardMarkup(
     [
         ["🔎 Market Scanner", "🔥 Strong Signals"],
@@ -246,6 +249,7 @@ async def _refresh_strong_signal_snapshot():
         saved_time
         and saved.get("market_scope") == market_scope
         and (now - saved_time).total_seconds() < 15 * 60
+        and all(str(oid) in STRONG_SIGNAL_CHARTS for oid in saved.get("opportunity_ids", []))
     ):
         cached_items = [
             item for item in (
@@ -301,12 +305,28 @@ async def _refresh_strong_signal_snapshot():
                 "higher_timeframe": result.get("higher_timeframe"),
             })
             strong.append(opportunity)
+            try:
+                STRONG_SIGNAL_CHARTS[str(opportunity["id"])] = create_market_chart(
+                    result.get("candles", frame), symbol, "15m",
+                    entry=result.get("entry"),
+                    stop_loss=result.get("stop_loss"),
+                    take_profits=targets,
+                    strategy=result.get("strategy"),
+                    signal_stage=result.get("signal_stage"),
+                )
+            except Exception:
+                logger.exception("Could not create Strong Signals indicator chart for %s.", symbol)
         except MarketDataError as exc:
             errors.append(f"{symbol}: {exc}")
             logger.warning("Strong Signals refresh unavailable for %s: %s", symbol, exc)
         except Exception:
             errors.append(f"{symbol}: analysis error")
             logger.exception("Strong Signals analysis failed for %s.", symbol)
+
+    active_chart_ids = {str(item["id"]) for item in strong}
+    for cached_id in list(STRONG_SIGNAL_CHARTS):
+        if cached_id not in active_chart_ids:
+            STRONG_SIGNAL_CHARTS.pop(cached_id, None)
 
     snapshot_time = datetime.now(WAT)
     state.set_scanner_state("strong_signals_snapshot", {
@@ -416,7 +436,14 @@ async def show_strong_signals(update, context):
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"optrack:{oid}")
         ]])
-        await update.message.reply_text(message, reply_markup=keyboard)
+        chart = STRONG_SIGNAL_CHARTS.get(str(oid))
+        if chart is not None:
+            chart.seek(0)
+            await update.message.reply_photo(
+                photo=chart, caption=message, reply_markup=keyboard,
+            )
+        else:
+            await update.message.reply_text(message, reply_markup=keyboard)
 
 
 def _signal_progress(signal):
@@ -577,6 +604,7 @@ async def _show_signal_detail(chat, user_id, signal_id):
             entry=signal.get("entry"),
             stop_loss=signal.get("stop_loss"),
             take_profits=targets,
+            strategy=signal.get("strategy"),
         )
         sent_message = await chat.send_photo(
             photo=chart,
@@ -878,6 +906,8 @@ async def analyse_market(update, context, symbol, timeframe):
             entry=result.get("entry"),
             stop_loss=result.get("stop_loss"),
             take_profits=result.get("take_profits"),
+            strategy=result.get("strategy"),
+            signal_stage=result.get("signal_stage"),
         )
 
         signal_id = (

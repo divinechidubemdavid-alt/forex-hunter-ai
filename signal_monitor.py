@@ -643,6 +643,7 @@ async def _check_trend_warning(app, user_id, signal, frame):
             entry=signal.get("entry"),
             stop_loss=signal.get("stop_loss"),
             take_profits=_targets(signal),
+            strategy=signal.get("strategy"),
         )
         chart.seek(0)
         latest = float(frame["close"].iloc[-1])
@@ -682,6 +683,7 @@ async def _refresh_saved_chart(app, user_id, signal, frame):
             entry=signal.get("entry"),
             stop_loss=signal.get("stop_loss"),
             take_profits=_targets(signal),
+            strategy=signal.get("strategy"),
         )
         chart.seek(0)
         latest = float(frame["close"].iloc[-1])
