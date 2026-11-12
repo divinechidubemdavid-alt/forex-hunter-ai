@@ -64,6 +64,10 @@ class EarlyTrendEntryTests(unittest.TestCase):
             patch.object(strategy, "resample_candles", return_value=frame),
             patch.object(strategy, "calculate_indicators", return_value=frame),
             patch.object(strategy, "_higher_timeframe_context", return_value="UNAVAILABLE"),
+            patch.object(
+                strategy, "_higher_timeframe_confirmations",
+                return_value={"1h": "BULLISH", "4h": "BULLISH"},
+            ),
             patch.object(strategy, "_trend_setup", return_value=None),
             patch.object(strategy, "_breakout_retest_setup", return_value=None),
             patch.object(strategy, "_early_trend_setup", return_value=("BUY", "SUPPORT_REVERSAL")),
