@@ -962,8 +962,11 @@ async def analyse_market(update, context, symbol, timeframe, trading_style="DAY"
             "take_profits": result.get("take_profits", []),
             "score": result.get("score", 0),
             "strategy": result.get("strategy", ""),
-            "candle_time": str(frame.index[-1]),
+            "candle_time": str(result.get("candle_time") or frame.index[-1]),
         }
+        if not style_has_trade_levels(trading_style):
+            context.user_data[signal_id].pop("stop_loss", None)
+            context.user_data[signal_id].pop("take_profits", None)
 
         chart.seek(0)
 
@@ -1130,31 +1133,32 @@ async def handle_callback(update, context):
             return
 
         take_profits = pending.get("take_profits", [])
-
-        record = state.add_signal(
-            user_id,
-            {
-                "symbol": pending["symbol"],
-                "trading_style": pending.get("trading_style", "DAY"),
-                "invalidation_rule": pending.get("invalidation_rule"),
-                "direction": pending["direction"],
-                "timeframe": pending["timeframe"],
-                "entry": pending.get("entry"),
+        trading_style = pending.get("trading_style", "DAY")
+        signal_record = {
+            "symbol": pending["symbol"],
+            "trading_style": trading_style,
+            "invalidation_rule": pending.get("invalidation_rule"),
+            "direction": pending["direction"],
+            "timeframe": pending["timeframe"],
+            "entry": pending.get("entry"),
+            "score": pending.get("score", 0),
+            "strategy": pending.get("strategy", ""),
+            "candle_time": pending.get("candle_time"),
+        }
+        if style_has_trade_levels(trading_style):
+            signal_record.update({
                 "stop_loss": pending.get("stop_loss"),
                 "tp1": take_profits[0] if len(take_profits) > 0 else None,
                 "tp2": take_profits[1] if len(take_profits) > 1 else None,
                 "tp3": take_profits[2] if len(take_profits) > 2 else None,
                 "take_profits": take_profits,
-                "score": pending.get("score", 0),
-                "strategy": pending.get("strategy", ""),
-                "candle_time": pending.get("candle_time"),
-            },
-        )
+            })
+        record = state.add_signal(user_id, signal_record)
 
         context.user_data.pop(signal_id, None)
 
         message = (
-            f"✅ SIGNAL #{record['id']} SAVED\n\n"
+            f"✅ {_signal_style_label(record)} — SIGNAL #{record['id']} SAVED\n\n"
             f"{record['symbol']} {record['direction']}\n"
             "It has been added to your tracked signals.\n\n"
             "Automatic milestone monitoring is active for this signal."
