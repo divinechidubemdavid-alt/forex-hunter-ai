@@ -229,6 +229,9 @@ def create_market_chart(
     # Use the strategy engine as the single source of truth for every plotted indicator.
     data = calculate_indicators(candles).tail(80).copy()
 
+    # EMA 50 is a visual higher-trend reference only; it does not alter signal rules.
+    data["ema50"] = data["close"].ewm(span=50, adjust=False).mean()
+
     for column in required:
         data[column] = pd.to_numeric(
             data[column],
@@ -307,6 +310,7 @@ def create_market_chart(
     # Overlay the exact EMA values calculated by strategy.calculate_indicators().
     ax.plot(x_values, data["ema9"], color=GREEN, linewidth=1.35, label="EMA 9", zorder=4)
     ax.plot(x_values, data["ema21"], color=GOLD, linewidth=1.35, label="EMA 21", zorder=4)
+    ax.plot(x_values, data["ema50"], color="#8DB8FF", linewidth=1.15, label="EMA 50", zorder=3)
 
     latest = data.iloc[-1]
     for column, label, color in (("support", "SUPPORT", GREEN), ("resistance", "RESISTANCE", RED)):
