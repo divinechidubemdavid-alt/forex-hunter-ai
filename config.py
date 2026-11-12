@@ -9,15 +9,13 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "").strip()
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
 
-# Eight approved markets.
+# Five approved markets. Removed pairs are intentionally unavailable
+# to manual analysis, automatic scanning, Strong Signals, and monitoring.
 MARKETS = {
     "XAU/USD": "XAU/USD",
     "EUR/USD": "EUR/USD",
     "GBP/USD": "GBP/USD",
     "USD/JPY": "USD/JPY",
-    "AUD/USD": "AUD/USD",
-    "USD/CAD": "USD/CAD",
-    "USD/CHF": "USD/CHF",
     "BTC/USD": "BTC/USD",
 }
 
@@ -87,16 +85,13 @@ PLACE_BROKER_ORDERS = False
 GOLD_BUDGET_SHARE = 0.50
 
 # Single source of truth for session eligibility.
-# Weekday session: supported forex pairs, Gold and BTC/USD.
+# Weekday session: Gold and the three retained forex pairs.
+# BTC/USD is intentionally reserved for weekend trading.
 WEEKDAY_MARKETS = (
     "XAU/USD",
     "EUR/USD",
     "GBP/USD",
     "USD/JPY",
-    "AUD/USD",
-    "USD/CAD",
-    "USD/CHF",
-    "BTC/USD",
 )
 
 # Weekend session: Bitcoin only.
@@ -108,9 +103,6 @@ FOREX_MARKETS = (
     "EUR/USD",
     "GBP/USD",
     "USD/JPY",
-    "AUD/USD",
-    "USD/CAD",
-    "USD/CHF",
 )
 
 # Telegram menu labels.
