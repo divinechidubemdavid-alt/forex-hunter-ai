@@ -867,6 +867,9 @@ def analyze(frame, timeframe="15m", trading_style=None):
     last = data.iloc[-1]
     previous = data.iloc[-2]
 
+    confirmations = _higher_timeframe_confirmations(
+        frame, trading_style, timeframe
+    )
     result.update({
         "candle_time": data.index[-1].isoformat(),
         "adx": _safe_float(last["adx"]),
@@ -874,10 +877,8 @@ def analyze(frame, timeframe="15m", trading_style=None):
         "atr": _safe_float(last["atr"]),
         "ema9": _safe_float(last["ema9"]),
         "ema21": _safe_float(last["ema21"]),
-        "higher_timeframe": _higher_timeframe_context(frame),
-        "higher_timeframe_confirmations": _higher_timeframe_confirmations(
-            frame, trading_style, timeframe
-        ),
+        "higher_timeframe": confirmations.get("1h", "UNAVAILABLE"),
+        "higher_timeframe_confirmations": confirmations,
     })
 
     atr = _safe_float(last["atr"])
