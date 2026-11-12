@@ -249,6 +249,7 @@ async def handle_account_callback(update, context):
                     "equity": float(equity if equity is not None else active["starting_balance"]),
                     "equity_source": equity_source,
                     "risk_note": risk_note,
+                    "awaiting_positions_count": True,
                 }
                 await query.message.reply_photo(
                     photo=image,
@@ -257,8 +258,9 @@ async def handle_account_callback(update, context):
                         f"Active account: {active['name']}\n"
                         f"Sizing equity: {float(equity if equity is not None else active['starting_balance']):,.2f} {active['currency']} ({equity_source})\n"
                         f"{risk_note}\n\n"
-                        "FINAL INPUT REQUIRED: Send the broker-verified monetary value of a 1.0-lot position for a 1.0 price-unit move, in this account currency.\n"
-                        "Send only the value verified for this exact symbol and account currency. Do not use a generic example or assume a value. No order will be placed."
+                        "How many separate positions do you want to open for this one signal? Send a whole number from 1 to 20. "
+                        "The total risk budget will be shared across all positions; choosing more positions will not increase total risk.\n"
+                        "After that, the planner will ask for the broker-verified monetary value needed for sizing. This planner does not place orders."
                     ),
                 )
             except (MarketDataError, ValueError, KeyError) as exc:
@@ -422,8 +424,22 @@ async def handle_account_text(update, context):
             await update.message.reply_text("Account-aware trade plan cancelled.", reply_markup=_home_keyboard())
             return True
         try:
-            unit_value = float(text.replace(",", "").strip())
             pending = context.user_data["account_plan_pending"]
+            if pending.get("awaiting_positions_count"):
+                if not text.isdigit():
+                    raise ValueError("Enter a whole number from 1 to 20.")
+                positions_count = int(text)
+                if not 1 <= positions_count <= 20:
+                    raise ValueError("Choose between 1 and 20 positions.")
+                pending["positions_count"] = positions_count
+                pending["awaiting_positions_count"] = False
+                await update.message.reply_text(
+                    f"Number of positions: {positions_count}. Total risk remains {pending['risk_percent']:g}% across all positions.\n\n"
+                    "Now send the broker-verified monetary value of a 1.0-lot position for a 1.0 price-unit move, in this account currency. "
+                    "Use the value for this exact symbol and account currency. Do not guess it, or send cancel."
+                )
+                return True
+            unit_value = float(text.replace(",", "").strip())
             profile = state.get_account_profile(user_id, pending["account_id"])
             if not profile or not profile.get("active"):
                 raise ValueError("Your active account changed or is unavailable. Start the planner again.")
@@ -436,7 +452,8 @@ async def handle_account_text(update, context):
             else:
                 profile_for_plan["snapshot"]["equity"] = pending["equity"]
             plan = calculate_account_trade_plan(
-                profile_for_plan, trade, pending["risk_percent"], unit_value
+                profile_for_plan, trade, pending["risk_percent"], unit_value,
+                positions_count=pending.get("positions_count", 1),
             )
             context.user_data.pop("account_plan_pending", None)
             report = render_account_action_report(
@@ -457,8 +474,13 @@ async def handle_account_text(update, context):
                     f"TP1: {plan['take_profits'][0]}\nTP2: {plan['take_profits'][1]}\nTP3: {plan['take_profits'][2]}\n"
                     f"Stop distance: {plan['risk_distance']}\n"
                     f"Verified unit value entered: {unit_value:g} {plan['currency']} per price unit per 1.0 lot\n"
-                    f"THEORETICAL volume: {plan['lots']:.4f} lots\n\n"
-                    "Before trading, verify tick size/value, contract size, account-currency conversion, lot step, minimum/maximum volume and commission. Round volume DOWN to your broker's permitted lot step. This is not a broker fill or order instruction."
+                    f"Number of positions: {plan['positions_count']}\n"
+                    f"Total theoretical volume: {plan['lots']:.4f} lots\n"
+                    f"Theoretical volume per position: {plan['per_position_lots']:.4f} lots\n"
+                    f"Risk per position (before rounding/costs): {plan['per_position_risk_amount']:,.2f} {plan['currency']}\n\n"
+                    "All positions use the same signal entry, technical stop loss and original TP1–TP3 plan. "
+                    "Total risk is shared, not multiplied. Before trading, verify tick size/value, contract size, account-currency conversion, lot step, minimum/maximum volume and commission. "
+                    "Round each volume DOWN to your broker's permitted lot step and recheck aggregate risk. Calculation only: no MT5 connection or order is placed."
                 ),
                 reply_markup=_home_keyboard(),
             )
