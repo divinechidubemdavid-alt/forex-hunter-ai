@@ -111,6 +111,24 @@ class ApiBudgetProtectionTests(unittest.TestCase):
             ["XAU/USD", "EUR/USD", "BTC/USD"],
         )
 
+    def test_utc_day_rollover_resets_all_api_pools(self):
+        fresh = self._fresh_state()
+        fresh.update({
+            "date": "2026-11-11",
+            "api_requests": 700,
+            "api_gold_monitor_requests": 350,
+            "api_other_background_requests": 350,
+            "last_request_epoch": 12345.0,
+        })
+        with patch.object(state, "_state", fresh), patch.object(
+            state, "_today", return_value="2026-11-12"
+        ):
+            state._refresh_daily_counter()
+        self.assertEqual(fresh["api_requests"], 0)
+        self.assertEqual(fresh["api_gold_monitor_requests"], 0)
+        self.assertEqual(fresh["api_other_background_requests"], 0)
+        self.assertEqual(fresh["last_request_epoch"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
