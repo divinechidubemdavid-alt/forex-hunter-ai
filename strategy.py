@@ -67,6 +67,12 @@ def calculate_indicators(frame):
         span=EMA_SLOW, adjust=False
     ).mean()
 
+    # EMA 50 is a higher-trend context indicator for chart transparency.
+    # It is deliberately not used as a trade-entry gate.
+    data["ema50"] = close.ewm(
+        span=50, adjust=False
+    ).mean()
+
     # True range and ATR
     true_range = pd.concat(
         [
