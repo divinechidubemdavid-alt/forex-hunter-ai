@@ -70,7 +70,15 @@ async def handle_account_callback(update, context):
     user_id = update.effective_user.id
     action = data.split(":", 1)[1]
 
-    if action == "register":
+    if action.startswith("drawdown:"):
+        wizard = context.user_data.get("account_wizard")
+        model = action.split(":", 1)[1].upper()
+        if not wizard or wizard.get("step") != "drawdown_model" or model not in {"STATIC", "TRAILING"}:
+            await query.message.reply_text("This registration choice has expired. Please start registration again.")
+            return True
+        wizard["drawdown_model"] = model
+        await _save_registered_account(query.message, context, user_id, wizard)
+    elif action == "register":
         context.user_data["account_wizard"] = {"step": "name"}
         await query.message.reply_photo(
             photo=render_account_action_report("Register Trading Account", "Set up a prop challenge, funded or personal account"),
@@ -269,6 +277,39 @@ async def handle_account_callback(update, context):
     return True
 
 
+async def _save_registered_account(message, context, user_id, wizard):
+    profile = create_profile(user_id, {
+        "name": wizard["name"],
+        "account_type": wizard["account_type"],
+        "firm_name": wizard.get("firm_name", ""),
+        "starting_balance": wizard["starting_balance"],
+        "currency": wizard["currency"],
+        "rules": {
+            "daily_loss_percent": wizard["daily_loss_percent"] or None,
+            "overall_loss_percent": wizard.get("overall_loss_percent") or None,
+            "profit_target_percent": wizard.get("profit_target_percent") or None,
+            "drawdown_model": wizard.get("drawdown_model"),
+            "verified": False,
+        },
+    })
+    state.add_account_profile(user_id, profile)
+    context.user_data.pop("account_wizard", None)
+    await message.reply_photo(
+        photo=render_account_action_report(
+            "Account Registered",
+            "Rules remain unverified until checked against the firm's current rulebook",
+            {"Starting balance": profile["starting_balance"]}
+        ),
+        caption=(
+            f"✅ Account registered: {profile['name']}\\n"
+            f"Type: {profile['account_type']}\\n"
+            f"Starting balance: {profile['starting_balance']} {profile['currency']}\\n"
+            "Rules are marked UNVERIFIED. Check your firm's official dashboard/rulebook before relying on them."
+        ),
+        reply_markup=_home_keyboard(),
+    )
+
+
 async def handle_account_text(update, context):
     text = (update.message.text or "").strip()
     user_id = update.effective_user.id
@@ -291,7 +332,7 @@ async def handle_account_text(update, context):
             "daily_loss_percent": "What is the daily loss limit? Enter the percent you are allowed to lose in one day. Example: 5. Enter 0 if there is no daily limit.",
             "overall_loss_percent": "What is the maximum total loss allowed? Enter the percent. Example: 10.",
             "profit_target_percent": "What profit target must you reach? Enter the percent. Example: 8.",
-            "drawdown_model": "How does the firm's maximum loss limit work? Send STATIC or TRAILING. Check the firm's rules if you are not sure.",
+            "drawdown_model": "Choose the drawdown rule shown in your prop firm's official rules. Static: the loss limit stays fixed. Trailing: the loss limit can move up as your account reaches new highs. Firms calculate this differently, so check your rulebook if you are unsure.",
         }
         try:
             if step not in prompts:
@@ -326,38 +367,16 @@ async def handle_account_text(update, context):
             if next_index < len(sequence):
                 next_step = sequence[next_index]
                 wizard["step"] = next_step
-                await update.message.reply_text(prompts[next_step])
+                if next_step == "drawdown_model":
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Static — fixed loss limit", callback_data="account:drawdown:STATIC")],
+                        [InlineKeyboardButton("Trailing — limit can move up", callback_data="account:drawdown:TRAILING")],
+                    ])
+                    await update.message.reply_text(prompts[next_step], reply_markup=keyboard)
+                else:
+                    await update.message.reply_text(prompts[next_step])
                 return True
-            profile = create_profile(user_id, {
-                "name": wizard["name"],
-                "account_type": wizard["account_type"],
-                "firm_name": wizard.get("firm_name", ""),
-                "starting_balance": wizard["starting_balance"],
-                "currency": wizard["currency"],
-                "rules": {
-                    "daily_loss_percent": wizard["daily_loss_percent"] or None,
-                    "overall_loss_percent": wizard.get("overall_loss_percent") or None,
-                    "profit_target_percent": wizard.get("profit_target_percent") or None,
-                    "drawdown_model": wizard.get("drawdown_model"),
-                    "verified": False,
-                },
-            })
-            state.add_account_profile(user_id, profile)
-            context.user_data.pop("account_wizard", None)
-            await update.message.reply_photo(
-                photo=render_account_action_report(
-                    "Account Registered",
-                    "Rules remain unverified until checked against the firm's current rulebook",
-                    {"Starting balance": profile["starting_balance"]}
-                ),
-                caption=(
-                    f"✅ Account registered: {profile['name']}\n"
-                    f"Type: {profile['account_type']}\n"
-                    f"Starting balance: {profile['starting_balance']} {profile['currency']}\n"
-                    "Rules are marked UNVERIFIED. Check your firm's official dashboard/rulebook before relying on them."
-                ),
-                reply_markup=_home_keyboard(),
-            )
+            await _save_registered_account(update.message, context, user_id, wizard)
             return True
         except (ValueError, KeyError) as exc:
             await update.message.reply_text(f"{exc}\nPlease try again.")
