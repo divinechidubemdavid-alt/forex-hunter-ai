@@ -629,7 +629,7 @@ async def _show_signal_detail(chat, user_id, signal_id):
             stop_loss=signal.get("stop_loss"),
             take_profits=targets,
             strategy=signal.get("strategy"),
-            trading_style=signal.get("trading_style"),
+            trading_style=signal.get("trading_style") or "LEGACY / UNKNOWN",
         )
         sent_message = await chat.send_photo(
             photo=chart,
