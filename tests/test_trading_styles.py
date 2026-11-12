@@ -1,5 +1,7 @@
 import unittest
 
+from strategy import _early_entry_score
+
 from trading_styles import (
     AUTOMATIC_TRADING_STYLE,
     STRONG_SIGNALS_TRADING_STYLE,
@@ -57,6 +59,22 @@ class TradingStylePolicyTests(unittest.TestCase):
         self.assertGreater(scalp["rsi"], day["rsi"])
         self.assertGreater(swing["adx"], day["adx"])
         self.assertGreater(swing["ema"], day["ema"])
+
+    def test_early_entry_scoring_uses_each_style_profile(self):
+        last = {
+            "open": 1.0, "close": 1.1, "high": 1.11, "low": 0.99,
+            "candle_range": 0.12, "rsi": 60, "plus_di": 10,
+            "minus_di": 20, "ema9": 1.0, "ema21": 1.1,
+            "adx": 10, "atr": 0,
+        }
+        previous = {
+            "rsi": 55, "plus_di": 10, "minus_di": 20,
+            "ema9": 1.0, "ema21": 1.1, "adx": 11,
+        }
+        scalp, _ = _early_entry_score(last, previous, "BUY", "TEST", "SCALPING")
+        day, _ = _early_entry_score(last, previous, "BUY", "TEST", "DAY")
+        swing, _ = _early_entry_score(last, previous, "BUY", "TEST", "SWING")
+        self.assertEqual((scalp, day, swing), (55, 40, 35))
 
     def test_style_specific_qualification_thresholds(self):
         self.assertEqual(style_minimum_score("SCALPING"), 72)
