@@ -17,6 +17,7 @@ import httpx
 import economic_events as ee
 import economic_research as research
 import state
+from config import WEEKDAY_MARKETS
 
 log = logging.getLogger(__name__)
 WAT = ZoneInfo("Africa/Lagos")
@@ -268,6 +269,9 @@ def _combine(ai: dict, technical: str | None) -> dict:
         "AUD": ["AUD/USD"], "CAD": ["USD/CAD"], "CHF": ["USD/CHF"],
         "XAU": ["XAU/USD"],
     }.get(currency, [])
+    # Economic-event directional outputs follow the weekday trading universe.
+    # BTC/USD is reserved for weekend trading and retired pairs are excluded.
+    pairs = [pair for pair in pairs if pair in WEEKDAY_MARKETS]
     market_biases = {}
     for pair in pairs:
         base, quote = pair.split("/")
