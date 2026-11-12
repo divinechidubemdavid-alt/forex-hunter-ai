@@ -166,7 +166,7 @@ def reserve_api_request(purpose='manual'):
         if used >= limit:
             return False, (
                 "Daily API safety limit reached. "
-                "The counter resets at midnight Nigeria time."
+                "The counter resets at midnight UTC."
             )
 
         now = time.time()
