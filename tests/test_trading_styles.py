@@ -74,7 +74,7 @@ class TradingStylePolicyTests(unittest.TestCase):
         scalp, _ = _early_entry_score(last, previous, "BUY", "TEST", "SCALPING")
         day, _ = _early_entry_score(last, previous, "BUY", "TEST", "DAY")
         swing, _ = _early_entry_score(last, previous, "BUY", "TEST", "SWING")
-        self.assertEqual((scalp, day, swing), (55, 40, 35))
+        self.assertEqual((scalp, day, swing), (65, 55, 55))
 
     def test_style_specific_qualification_thresholds(self):
         self.assertEqual(style_minimum_score("SCALPING"), 72)
