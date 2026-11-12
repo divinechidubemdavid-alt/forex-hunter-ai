@@ -1057,6 +1057,36 @@ async def handle_callback(update, context):
         parts = data.split(":")
         if len(parts) != 4:
             return
+        trading_style = normalise_trading_style(parts[1])
+        timeframe = parts[2]
+        symbol = parts[3]
+        try:
+            required_higher_timeframes(trading_style, timeframe)
+        except ValueError as exc:
+            await query.edit_message_text(str(exc))
+            return
+        if symbol not in MARKETS or not is_market_allowed(symbol, datetime.now(WAT).weekday()):
+            await query.edit_message_text("That market is not available in the current session.")
+            return
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                "⚡ GENERATE ANALYSIS",
+                callback_data=f"generate:{trading_style}:{timeframe}:{symbol}",
+            )
+        ]])
+        await query.edit_message_text(
+            f"{style_label(trading_style)}\\n"
+            f"Market: {symbol}\\n"
+            f"Entry timeframe: {timeframe.upper()}\\n\\n"
+            "Ready to generate the analysis?",
+            reply_markup=keyboard,
+        )
+        return
+
+    if data.startswith("generate:"):
+        parts = data.split(":")
+        if len(parts) != 4:
+            return
         await analyse_market(
             update, context, parts[3], parts[2], parts[1],
         )
