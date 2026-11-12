@@ -127,6 +127,48 @@ class AccountManagerTests(unittest.TestCase):
         self.assertEqual(steps[:3], ["name", "account_type", "starting_balance"])
         self.assertIn("currency", steps)
 
+
+    def test_personal_account_registration_only_asks_for_daily_loss(self):
+        from account_manager import account_registration_steps
+        self.assertEqual(
+            account_registration_steps("PERSONAL"),
+            ["name", "account_type", "starting_balance", "currency", "daily_loss_percent"],
+        )
+
+    def test_prop_challenge_registration_asks_for_all_firm_limits(self):
+        from account_manager import account_registration_steps
+        self.assertEqual(
+            account_registration_steps("PROP_CHALLENGE"),
+            ["name", "account_type", "firm_name", "starting_balance", "currency",
+             "daily_loss_percent", "overall_loss_percent", "profit_target_percent", "drawdown_model"],
+        )
+
+    def test_instant_funding_registration_asks_for_all_firm_limits(self):
+        from account_manager import account_registration_steps
+        self.assertEqual(
+            account_registration_steps("FUNDED_PROP"),
+            ["name", "account_type", "firm_name", "starting_balance", "currency",
+             "daily_loss_percent", "overall_loss_percent", "profit_target_percent", "drawdown_model"],
+        )
+
+    def test_personal_profile_does_not_keep_prop_firm_limits(self):
+        profile = create_profile("123", {
+            "name": "Personal Trading",
+            "account_type": "PERSONAL",
+            "starting_balance": 1000,
+            "currency": "USD",
+            "rules": {
+                "daily_loss_percent": 3,
+                "overall_loss_percent": 10,
+                "profit_target_percent": 8,
+                "drawdown_model": "TRAILING",
+            },
+        })
+        self.assertEqual(profile["rules"]["daily_loss_percent"], 3)
+        self.assertIsNone(profile["rules"]["overall_loss_percent"])
+        self.assertIsNone(profile["rules"]["profit_target_percent"])
+        self.assertIsNone(profile["rules"]["drawdown_model"])
+
     def test_registration_sequence_keeps_firm_name_for_prop_accounts(self):
         from account_manager import account_registration_steps
         steps = account_registration_steps("PROP_CHALLENGE")
