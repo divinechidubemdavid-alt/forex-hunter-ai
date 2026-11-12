@@ -111,11 +111,15 @@ class AccountManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             create_profile("123", {
                 "name": "Bad Account",
-                "account_type": "PERSONAL",
+                "account_type": "PROP_CHALLENGE",
                 "starting_balance": 1000,
                 "currency": "USD",
                 "rules": {"drawdown_model": "UNKNOWN"},
             })
+
+    def test_account_type_accepts_instant_funding_label(self):
+        from account_manager import normalise_account_type
+        self.assertEqual(normalise_account_type("Instant Funding"), "FUNDED_PROP")
 
     def test_account_type_accepts_personal_account_label(self):
         from account_manager import normalise_account_type
