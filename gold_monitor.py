@@ -250,10 +250,10 @@ def classify_gold_market(frame, timeframe, previous_state=None):
             )
             if bullish_pullback:
                 condition, direction = "PULLBACK CONTINUATION — UP", "UP"
-                detail = "Price pulled back towards the EMA21 area and closed bullish above EMA9."
+                detail = "Price pulled back towards EMA21 or rising trendline support and closed bullish above EMA9."
             elif bearish_pullback:
                 condition, direction = "PULLBACK CONTINUATION — DOWN", "DOWN"
-                detail = "Price pulled back towards the EMA21 area and closed bearish below EMA9."
+                detail = "Price pulled back towards EMA21 or falling trendline resistance and closed bearish below EMA9."
             elif (
                 adx < 18
                 and abs(ema9 - ema21) <= atr * 0.60
