@@ -142,6 +142,16 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
     if direction not in ("BUY", "SELL"):
         return
 
+    signal_time = _timestamp(signal.get("candle_time"))
+    checked_time = _timestamp(signal.get("last_checked"))
+    current_time = _timestamp(candle_time)
+    if current_time is None:
+        return
+    if signal_time is not None and current_time <= signal_time:
+        return
+    if checked_time is not None and current_time <= checked_time:
+        return
+
     if str(signal.get("trading_style", "")).upper() == "SCALPING":
         # Scalping has no Stop Loss or TP levels. Record candle progress and
         # let the reversal monitor evaluate completed-candle invalidation.
@@ -169,17 +179,6 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
     candle_close = _number(candle.get("close"))
 
     if candle_high is None or candle_low is None or candle_close is None:
-        return
-
-    signal_time = _timestamp(signal.get("candle_time"))
-    checked_time = _timestamp(signal.get("last_checked"))
-    current_time = _timestamp(candle_time)
-
-    if current_time is None:
-        return
-    if signal_time is not None and current_time <= signal_time:
-        return
-    if checked_time is not None and current_time <= checked_time:
         return
 
     settings = state.get_user_settings(user_id) or {}
@@ -647,10 +646,20 @@ async def _check_trend_warning(app, user_id, signal, frame):
 
     # One alert per continuous warning episode, not one alert per candle.
     warning_key = warning["type"]
+    warning_time = _timestamp(warning.get("candle_time"))
+    signal_time = _timestamp(signal.get("candle_time"))
+    previous_warning_time = _timestamp(signal.get("trend_warning_candle_time"))
+    if signal_time is not None and warning_time is not None and warning_time <= signal_time:
+        return
+    if previous_warning_time is not None and warning_time is not None and warning_time <= previous_warning_time:
+        return
     if previous_warning == warning_key:
         return
 
-    state.update_signal(signal_id, {"trend_warning_key": warning_key})
+    state.update_signal(signal_id, {
+        "trend_warning_key": warning_key,
+        "trend_warning_candle_time": warning.get("candle_time"),
+    })
     state.add_signal_event(
         signal_id,
         warning["type"],
