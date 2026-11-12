@@ -11,6 +11,7 @@ from gold_monitor import (
     GOLD_FETCH_SCHEDULE,
     GOLD_SOURCE_OUTPUTSIZE,
     _breakout_retest,
+    _recent_trendline_breakout,
     _trendline_breakout,
     classify_gold_market,
     estimated_daily_gold_requests,
@@ -155,6 +156,66 @@ class GoldStructureDetectionTests(unittest.TestCase):
                 frame, {"direction": "UP", "level": 100.0}, atr=1.0
             )
         )
+
+    def test_retest_is_found_even_if_a_later_candle_has_moved_away(self):
+        index = pd.date_range("2026-11-01", periods=3, freq="min", tz="UTC")
+        frame = pd.DataFrame(
+            {
+                "open": [100.1, 100.4, 101.0],
+                "high": [101.0, 101.0, 102.0],
+                "low": [100.0, 99.9, 100.8],
+                "close": [100.5, 100.6, 101.7],
+            },
+            index=index,
+        )
+        self.assertEqual(
+            _breakout_retest(
+                frame,
+                {
+                    "direction": "UP",
+                    "level": 100.0,
+                    "candle_time": str(index[0]),
+                },
+                atr=1.0,
+            ),
+            "UP",
+        )
+
+    def test_recent_breakout_scan_catches_break_before_latest_candle(self):
+        count = 40
+        close = np.full(count, 99.5)
+        open_price = close - 0.05
+        high = np.full(count, 100.0)
+        low = np.full(count, 99.0)
+        high[10] = 110.0
+        high[20] = 108.0
+        close[-2] = 104.3
+        open_price[-2] = 104.1
+        close[-1] = 104.5
+        open_price[-1] = 104.2
+        high[-1] = 105.0
+        low[-1] = 104.0
+        index = pd.date_range("2026-11-01", periods=count + 1, freq="min", tz="UTC")
+        frame = pd.DataFrame(
+            {"open": open_price, "high": high, "low": low, "close": close},
+            index=index[:-1],
+        )
+        continuation = pd.DataFrame(
+            {
+                "open": [104.5],
+                "high": [105.2],
+                "low": [104.4],
+                "close": [104.6],
+            },
+            index=index[-1:],
+        )
+        frame = pd.concat([frame, continuation])
+        result = _recent_trendline_breakout(
+            frame, atr=0.5, previous_candle_time=str(index[-3])
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["direction"], "UP")
+        self.assertEqual(result["candle_time"], str(index[-2]))
 
 
 class GoldApiScheduleTests(unittest.TestCase):
