@@ -7,6 +7,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from trading_styles import style_label
+
 BG = "#080B0A"
 PANEL = "#101613"
 GREEN = "#39FF88"
@@ -38,6 +40,13 @@ def _base(title, subtitle):
     return fig
 
 
+def _style(signal):
+    try:
+        return style_label(signal.get("trading_style", ""))
+    except ValueError:
+        return "LEGACY / UNKNOWN"
+
+
 def _realised_r(signal):
     if signal.get("realised_r") is not None:
         try:
@@ -67,6 +76,10 @@ def create_performance_report(signals, period_label="All time"):
     completed = sum(s.get("status") != "TRACKING" for s in signals)
     tp_counts = [sum(bool(s.get(f"tp{i}_hit")) for s in signals)
                  for i in (1, 2, 3)]
+    style_counts = {
+        label: sum(_style(s) == label for s in signals)
+        for label in ("SCALPING TRADE", "DAY TRADE", "SWING TRADE")
+    }
 
     fig = _base("PERFORMANCE CENTRE", f"{period_label}  •  {datetime.now(WAT):%d %b %Y, %H:%M} WAT")
     ax = fig.add_axes([0.07, 0.12, 0.86, 0.62])
@@ -96,6 +109,9 @@ def create_performance_report(signals, period_label="All time"):
     ax.text(0.03, 0.25,
             f"Target achievements     TP1: {tp_counts[0]}     TP2: {tp_counts[1]}     TP3: {tp_counts[2]}",
             transform=ax.transAxes, color=TEXT, fontsize=12)
+    ax.text(0.03, 0.16,
+            "STYLE BREAKDOWN     " + "     ".join(f"{k}: {v}" for k, v in style_counts.items()),
+            transform=ax.transAxes, color=GOLD, fontsize=9)
     ax.text(0.03, 0.08,
             "Wins include TP3 and manual closes after TP1/TP2; R uses recorded monitored prices.",
             transform=ax.transAxes, color=MUTED, fontsize=9)
@@ -118,14 +134,19 @@ def create_tracked_report(signals):
             direction = str(s.get("direction", ""))
             color = GREEN if direction == "BUY" else RED
             symbol = s.get("symbol", "Unknown")
-            ax.text(0.02, y, f"{symbol}  {direction}", color=color,
-                    fontsize=12, weight="bold", transform=ax.transAxes)
-            ax.text(0.42, y, f"Entry {s.get('entry', '—')}   SL {s.get('stop_loss', '—')}",
-                    color=TEXT, fontsize=9, transform=ax.transAxes)
-            progress = "  ".join(
-                f"TP{i} {'✓' if s.get(f'tp{i}_hit') else '○'}"
-                for i in (1, 2, 3)
-            )
+            ax.text(0.02, y, f"{_style(s)}  •  {symbol}  {direction}", color=color,
+                    fontsize=10, weight="bold", transform=ax.transAxes)
+            if _style(s) == "SCALPING TRADE":
+                ax.text(0.42, y, f"Entry {s.get('entry', '—')}   No SL / TP levels",
+                        color=TEXT, fontsize=9, transform=ax.transAxes)
+                progress = "Reversal / invalidation monitoring"
+            else:
+                ax.text(0.42, y, f"Entry {s.get('entry', '—')}   SL {s.get('stop_loss', '—')}",
+                        color=TEXT, fontsize=9, transform=ax.transAxes)
+                progress = "  ".join(
+                    f"TP{i} {'✓' if s.get(f'tp{i}_hit') else '○'}"
+                    for i in (1, 2, 3)
+                )
             ax.text(0.02, y - 0.045,
                     f"{progress}  •  {s.get('timeframe', '—')}  •  {s.get('status', 'TRACKING')}",
                     color=MUTED, fontsize=9, transform=ax.transAxes)
@@ -188,7 +209,7 @@ def create_history_report(signals, period_label="All history"):
     table_ax = fig.add_axes([0.055, 0.055, 0.89, 0.54])
     table_ax.set_facecolor(PANEL)
     table_ax.axis("off")
-    headers = ["ID", "MARKET", "SIDE", "TF", "RESULT", "TARGET", "R"]
+    headers = ["ID", "STYLE", "MARKET", "SIDE", "TF", "RESULT", "TARGET", "R"]
     rows = []
     for signal in visible:
         status = str(signal.get("status", "N/A"))
@@ -209,6 +230,7 @@ def create_history_report(signals, period_label="All history"):
             result, target = status.replace("_", " "), "—"
         rows.append([
             f"#{signal.get('id', '?')}",
+            _style(signal),
             str(signal.get("symbol", "?")),
             str(signal.get("direction", "?")),
             str(signal.get("timeframe", "—")).upper(),
@@ -220,7 +242,7 @@ def create_history_report(signals, period_label="All history"):
     if rows:
         table = table_ax.table(
             cellText=rows, colLabels=headers, cellLoc="left", colLoc="left",
-            loc="upper center", colWidths=[0.07, 0.16, 0.08, 0.07, 0.25, 0.19, 0.10],
+            loc="upper center", colWidths=[0.06, 0.15, 0.13, 0.07, 0.06, 0.22, 0.17, 0.09],
         )
         table.auto_set_font_size(False)
         table.set_fontsize(8)
