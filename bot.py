@@ -74,6 +74,47 @@ TIMEFRAMES = [
     ("1 Day", "1day"),
 ]
 
+MENU_NAVIGATION_LABELS = {
+    "🔎 Market Scanner",
+    "🔥 Strong Signals",
+    "📌 My Tracked Signals",
+    "📊 Performance",
+    "📚 Signal History",
+    "⚙️ Settings",
+    "🗓 Economic Events",
+    "🛡 Account Manager",
+    "ℹ️ Help",
+}
+
+PENDING_INPUT_KEYS = (
+    "account_wizard",
+    "account_snapshot_id",
+    "account_plan_pending",
+    "account_risk_pending",
+    "awaiting_custom_risk",
+    "econ_awaiting",
+    "report_date_range",
+)
+
+
+def _reset_pending_input_for_menu_navigation(context, message_text):
+    """Let a menu button cancel any unfinished text-input flow.
+
+    Telegram reply-keyboard buttons arrive as ordinary text messages. Without
+    this guard, a menu label can be mistaken for a numeric value by an active
+    account/risk wizard and raise a float-conversion error.
+    """
+    if str(message_text or "").strip() not in MENU_NAVIGATION_LABELS:
+        return []
+
+    cleared = []
+    for key in PENDING_INPUT_KEYS:
+        if key in context.user_data:
+            context.user_data.pop(key, None)
+            cleared.append(key)
+    return cleared
+
+
 
 def _user_id(update):
     return str(update.effective_user.id)
@@ -1477,6 +1518,16 @@ def text_for_event_center(update):
 
 
 async def handle_text(update, context):
+    incoming_text = (update.message.text or "").strip()
+    cancelled_inputs = _reset_pending_input_for_menu_navigation(
+        context, incoming_text
+    )
+    if cancelled_inputs:
+        await update.message.reply_text(
+            "Your previous input step was cancelled so you can navigate the menu. "
+            "No account figures or settings were changed."
+        )
+
     if await handle_account_text(update, context):
         return
     if text_for_event_center(update):
