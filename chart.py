@@ -148,7 +148,7 @@ def _draw_market_annotations(ax, data, x_values):
                 color=GREEN, linestyle=":", linewidth=1.2, zorder=5,
             )
             ax.annotate(
-                "BOS ↑  STRUCTURE BREAK",
+                "STRUCTURE BREAK ↑",
                 (x_values[-1], resistance),
                 xytext=(-8, 10), textcoords="offset points",
                 color=GREEN, fontsize=7, ha="right", zorder=8,
@@ -163,7 +163,7 @@ def _draw_market_annotations(ax, data, x_values):
                 color=RED, linestyle=":", linewidth=1.2, zorder=5,
             )
             ax.annotate(
-                "BOS ↓  STRUCTURE BREAK",
+                "STRUCTURE BREAK ↓",
                 (x_values[-1], support),
                 xytext=(-8, -12), textcoords="offset points",
                 color=RED, fontsize=7, ha="right", zorder=8,
