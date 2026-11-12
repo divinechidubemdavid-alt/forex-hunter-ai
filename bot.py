@@ -27,6 +27,13 @@ from market_scope import get_strong_signal_markets, get_session_name, is_market_
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
 from chart import create_market_chart
+from trading_styles import (
+    normalise_trading_style,
+    required_higher_timeframes,
+    style_has_trade_levels,
+    style_label,
+    style_timeframes,
+)
 from economic_events_bot import show_event_center, handle_event_callback, handle_event_text, register_event_handlers
 from account_manager_bot import MENU_LABEL as ACCOUNT_MANAGER_LABEL, show_account_manager, handle_account_callback, handle_account_text
 from report_charts import (
@@ -72,42 +79,53 @@ def _user_id(update):
     return str(update.effective_user.id)
 
 
-def _market_keyboard(markets):
-    rows = []
+def _style_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Scalping Trade", callback_data="style:SCALPING")],
+        [InlineKeyboardButton("📅 Day Trade", callback_data="style:DAY")],
+        [InlineKeyboardButton("🌊 Swing Trade", callback_data="style:SWING")],
+    ])
 
+
+def _timeframe_keyboard(trading_style):
+    labels = {
+        "1m": "1 Minute", "5m": "5 Minutes",
+        "15m": "15 Minutes", "30m": "30 Minutes",
+        "1h": "1 Hour", "4h": "4 Hours", "1day": "1 Day",
+    }
+    timeframes = style_timeframes(trading_style)
+    rows = []
+    for start in range(0, len(timeframes), 2):
+        row = [
+            InlineKeyboardButton(
+                labels[timeframe],
+                callback_data=f"tf:{trading_style}:{timeframe}",
+            )
+            for timeframe in timeframes[start:start + 2]
+        ]
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
+def _market_keyboard(markets, trading_style, timeframe):
+    rows = []
     for start in range(0, len(markets), 2):
-        row = []
-
-        for market in markets[start:start + 2]:
-            row.append(
-                InlineKeyboardButton(
-                    market,
-                    callback_data=f"market:{market}",
-                )
+        row = [
+            InlineKeyboardButton(
+                market,
+                callback_data=f"market:{trading_style}:{timeframe}:{market}",
             )
-
+            for market in markets[start:start + 2]
+        ]
         rows.append(row)
-
     return InlineKeyboardMarkup(rows)
 
 
-def _timeframe_keyboard(market):
-    rows = []
-
-    for start in range(0, len(TIMEFRAMES), 2):
-        row = []
-
-        for label, timeframe in TIMEFRAMES[start:start + 2]:
-            row.append(
-                InlineKeyboardButton(
-                    label,
-                    callback_data=f"tf:{market}:{timeframe}",
-                )
-            )
-
-        rows.append(row)
-
-    return InlineKeyboardMarkup(rows)
+def _signal_style_label(signal):
+    try:
+        return style_label(signal.get("trading_style", ""))
+    except ValueError:
+        return "LEGACY / UNKNOWN"
 
 
 def _signal_keyboard(signal_id):
@@ -181,25 +199,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_market_scanner(update, context):
-    now = datetime.now(WAT)
-    session = get_session_name(now.weekday())
-    available_markets = get_strong_signal_markets(MARKETS, now.weekday())
-
-    if session == "weekend":
-        heading = (
-            "🔎 WEEKEND MARKET ANALYSIS\n\n"
-            "Bitcoin (BTC/USD) is the only enabled weekend market. "
-            "Choose it below to select a timeframe."
-        )
-    else:
-        heading = (
-            "🔎 WEEKDAY MARKET ANALYSIS\n\n"
-            "Choose a supported forex pair or Gold (XAU/USD) to analyse."
-        )
-
     await update.message.reply_text(
-        heading,
-        reply_markup=_market_keyboard(available_markets),
+        "🔎 ANALYZE MARKET\n\n"
+        "First choose your trading style. Each style has its own entry "
+        "timeframes and higher-timeframe confirmation requirements.",
+        reply_markup=_style_keyboard(),
     )
 
 
@@ -256,6 +260,7 @@ async def _refresh_strong_signal_snapshot():
                 state.get_opportunity(oid) for oid in saved.get("opportunity_ids", [])
             )
             if item and item.get("symbol") in scan_markets
+            and item.get("trading_style") == "DAY"
         ]
         return (
             cached_items,
@@ -272,7 +277,7 @@ async def _refresh_strong_signal_snapshot():
         try:
             frame = await _fetch_strong_market_frame(symbol)
             markets_checked += 1
-            result = analyze(frame, "15m")
+            result = analyze(frame, "15m", trading_style="DAY")
             if result.get("status") not in ("BUY", "SELL"):
                 continue
             if float(result.get("score", 0)) < 70:
@@ -280,6 +285,8 @@ async def _refresh_strong_signal_snapshot():
 
             result["symbol"] = symbol
             result["timeframe"] = "15m"
+            result["trading_style"] = "DAY"
+            result["style_label"] = "DAY TRADE"
             result["candle_time"] = str(
                 result.get("candle_time") or frame.index[-1]
             )
@@ -291,6 +298,8 @@ async def _refresh_strong_signal_snapshot():
             )
             opportunity = state.add_opportunity(key, {
                 "symbol": symbol,
+                "trading_style": "DAY",
+                "style_label": "DAY TRADE",
                 "direction": result["status"],
                 "timeframe": "15m",
                 "entry": result.get("entry"),
@@ -313,6 +322,7 @@ async def _refresh_strong_signal_snapshot():
                     take_profits=targets,
                     strategy=result.get("strategy"),
                     signal_stage=result.get("signal_stage"),
+                    trading_style="DAY",
                 )
             except Exception:
                 logger.exception("Could not create Strong Signals indicator chart for %s.", symbol)
@@ -348,7 +358,7 @@ async def show_strong_signals(update, context):
         else "configured forex pairs and Gold (weekday mode)"
     )
     await update.message.reply_text(
-        "🔄 Refreshing Strong Signals across "
+        "🔄 Refreshing DAY TRADE Strong Signals across "
         f"{market_scope_text} using the latest completed 15-minute candles. "
         "This may take a little while."
     )
@@ -396,7 +406,7 @@ async def show_strong_signals(update, context):
 
     label = "cached scan" if from_cache else "fresh scan"
     await update.message.reply_text(
-        f"🔥 STRONG SIGNALS — {label}\n"
+        f"🔥 STRONG SIGNALS — DAY TRADE ONLY — {label}\n"
         f"Last scan: {refreshed_at.strftime('%d %b %Y, %H:%M:%S')} WAT\n"
         f"Markets checked successfully: {markets_checked}/{len(scan_markets)}\n"
         f"Qualifying fresh setups: {len(strong)}\n\n"
@@ -421,7 +431,7 @@ async def show_strong_signals(update, context):
     for item in strong:
         oid = item.get("id")
         message = (
-            f"🔥 STRONG OPPORTUNITY #{oid}\n\n"
+            f"🔥 DAY TRADE — STRONG OPPORTUNITY #{oid}\n\n"
             f"Market: {item.get('symbol', 'N/A')}\n"
             f"Direction: {item.get('direction', 'N/A')}\n"
             f"Timeframe: {item.get('timeframe', '15m')}\n"
@@ -447,6 +457,8 @@ async def show_strong_signals(update, context):
 
 
 def _signal_progress(signal):
+    if str(signal.get("trading_style", "")).upper() == "SCALPING":
+        return "Completed-candle reversal / invalidation monitoring"
     parts = []
     for number in (1, 2, 3):
         hit = bool(signal.get(f"tp{number}_hit"))
@@ -489,17 +501,21 @@ async def _send_tracked_signals(chat, user_id):
         status = signal.get("status", "TRACKING")
         progress = _signal_progress(signal)
         text = (
-            f"📌 TRACKED SIGNAL #{signal_id}\n\n"
+            f"📌 {_signal_style_label(signal)} — TRACKED SIGNAL #{signal_id}\n\n"
             f"Market: {signal.get('symbol', 'N/A')}\n"
             f"Direction: {signal.get('direction', 'N/A')}\n"
             f"Timeframe: {signal.get('timeframe', 'N/A')}\n"
             f"Entry: {signal.get('entry', 'N/A')}\n"
             f"Current price: {signal.get('current_price', 'Not updated')}\n"
-            f"Stop loss: {signal.get('stop_loss', 'N/A')}\n"
-            f"TP1: {signal.get('tp1', 'N/A')}\n"
-            f"TP2: {signal.get('tp2', 'N/A')}\n"
-            f"TP3: {signal.get('tp3', 'N/A')}\n\n"
-            f"Progress: {progress}\n"
+            + (
+                f"Stop loss: {signal.get('stop_loss', 'N/A')}\n"
+                f"TP1: {signal.get('tp1', 'N/A')}\n"
+                f"TP2: {signal.get('tp2', 'N/A')}\n"
+                f"TP3: {signal.get('tp3', 'N/A')}\n"
+                if style_has_trade_levels(signal.get("trading_style", "DAY"))
+                else f"Management: {signal.get('invalidation_rule', 'Completed-candle reversal monitoring')}\n"
+            )
+            + f"\nProgress: {progress}\n"
             f"Status: {status}\n"
             f"Realised R: {float(signal.get('realised_r', 0) or 0):+.2f}R\n\n"
             "Open this signal to view its individual market chart."
@@ -538,16 +554,20 @@ async def _show_signal_detail(chat, user_id, signal_id):
     event_text = "\n".join(event_lines) if event_lines else "No milestones recorded yet."
 
     caption = (
-        f"📈 {signal.get('symbol', 'Unknown')} — "
+        f"📈 {_signal_style_label(signal)} — {signal.get('symbol', 'Unknown')} — "
         f"{signal.get('direction', 'N/A')}\n"
         f"Signal #{signal_id}  |  {str(signal.get('timeframe', '15m')).upper()}\n\n"
         f"Entry: {signal.get('entry', 'N/A')}\n"
         f"Current price: {current_price}\n"
-        f"Stop loss: {signal.get('stop_loss', 'N/A')}\n"
-        f"TP1: {signal.get('tp1', 'N/A')}\n"
-        f"TP2: {signal.get('tp2', 'N/A')}\n"
-        f"TP3: {signal.get('tp3', 'N/A')}\n\n"
-        f"Progress: {progress}\n"
+        + (
+            f"Stop loss: {signal.get('stop_loss', 'N/A')}\n"
+            f"TP1: {signal.get('tp1', 'N/A')}\n"
+            f"TP2: {signal.get('tp2', 'N/A')}\n"
+            f"TP3: {signal.get('tp3', 'N/A')}\n"
+            if style_has_trade_levels(signal.get("trading_style", "DAY"))
+            else f"Management: {signal.get('invalidation_rule', 'Completed-candle reversal monitoring')}\n"
+        )
+        + f"\nProgress: {progress}\n"
         f"Status: {status}\n"
         f"Realised result: {float(signal.get('realised_r', 0) or 0):+.2f}R\n"
         f"Last market check: {last_checked}\n\n"
@@ -605,6 +625,7 @@ async def _show_signal_detail(chat, user_id, signal_id):
             stop_loss=signal.get("stop_loss"),
             take_profits=targets,
             strategy=signal.get("strategy"),
+            trading_style=signal.get("trading_style"),
         )
         sent_message = await chat.send_photo(
             photo=chart,
@@ -853,8 +874,14 @@ async def show_api_usage(chat):
     await chat.send_message(text, reply_markup=keyboard)
 
 
-async def analyse_market(update, context, symbol, timeframe):
+async def analyse_market(update, context, symbol, timeframe, trading_style="DAY"):
     user_id = _user_id(update)
+    trading_style = normalise_trading_style(trading_style)
+    try:
+        required_higher_timeframes(trading_style, timeframe)
+    except ValueError as exc:
+        await update.callback_query.edit_message_text(str(exc))
+        return
 
     if symbol not in MARKETS:
         await update.callback_query.edit_message_text(
@@ -884,13 +911,14 @@ async def analyse_market(update, context, symbol, timeframe):
         result = analyze(
             frame,
             timeframe,
+            trading_style=trading_style,
         )
 
         result["symbol"] = symbol
 
         if result.get("status") not in ("BUY", "SELL"):
             await update.effective_chat.send_message(
-                f"🔎 {symbol} — NO QUALIFYING SETUP\n\n"
+                f"🔎 {style_label(trading_style)} — {symbol} — NO QUALIFYING SETUP\n\n"
                 f"{result.get('reason', 'The conditions are not aligned.')}\n\n"
                 "No trade recommendation has been generated.",
                 reply_markup=MENU,
@@ -908,6 +936,7 @@ async def analyse_market(update, context, symbol, timeframe):
             take_profits=result.get("take_profits"),
             strategy=result.get("strategy"),
             signal_stage=result.get("signal_stage"),
+            trading_style=trading_style,
         )
 
         signal_id = (
@@ -922,6 +951,9 @@ async def analyse_market(update, context, symbol, timeframe):
         ]])
         context.user_data[signal_id] = {
             "symbol": symbol,
+            "trading_style": trading_style,
+            "style_label": style_label(trading_style),
+            "invalidation_rule": result.get("invalidation_rule"),
             "direction": result["status"],
             "timeframe": timeframe,
             "entry": result.get("entry"),
@@ -978,26 +1010,39 @@ async def handle_callback(update, context):
     data = query.data or ""
     user_id = _user_id(update)
 
-    if data.startswith("market:"):
-        market = data.split(":", 1)[1]
-
+    if data.startswith("style:"):
+        trading_style = normalise_trading_style(data.split(":", 1)[1])
         await query.edit_message_text(
-            f"Choose a timeframe for {market}:",
-            reply_markup=_timeframe_keyboard(market),
+            f"{style_label(trading_style)} selected. Choose an entry timeframe:",
+            reply_markup=_timeframe_keyboard(trading_style),
         )
         return
 
     if data.startswith("tf:"):
         parts = data.split(":")
-
         if len(parts) != 3:
             return
+        trading_style = normalise_trading_style(parts[1])
+        timeframe = parts[2]
+        try:
+            required_higher_timeframes(trading_style, timeframe)
+        except ValueError as exc:
+            await query.edit_message_text(str(exc))
+            return
+        markets = get_strong_signal_markets(MARKETS, datetime.now(WAT).weekday())
+        await query.edit_message_text(
+            f"{style_label(trading_style)} — {timeframe.upper()} selected. "
+            "Now choose a market:",
+            reply_markup=_market_keyboard(markets, trading_style, timeframe),
+        )
+        return
 
+    if data.startswith("market:"):
+        parts = data.split(":")
+        if len(parts) != 4:
+            return
         await analyse_market(
-            update,
-            context,
-            parts[1],
-            parts[2],
+            update, context, parts[3], parts[2], parts[1],
         )
         return
 
@@ -1045,6 +1090,7 @@ async def handle_callback(update, context):
         record = state.add_signal(user_id, {
             "opportunity_id": str(opportunity_id),
             "symbol": opportunity.get("symbol"),
+            "trading_style": opportunity.get("trading_style", "DAY"),
             "direction": opportunity.get("direction"),
             "timeframe": opportunity.get("timeframe", "15m"),
             "entry": opportunity.get("entry"),
@@ -1088,6 +1134,8 @@ async def handle_callback(update, context):
             user_id,
             {
                 "symbol": pending["symbol"],
+                "trading_style": pending.get("trading_style", "DAY"),
+                "invalidation_rule": pending.get("invalidation_rule"),
                 "direction": pending["direction"],
                 "timeframe": pending["timeframe"],
                 "entry": pending.get("entry"),
