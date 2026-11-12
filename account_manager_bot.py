@@ -275,6 +275,12 @@ async def handle_account_text(update, context):
 
     wizard = context.user_data.get("account_wizard")
     if wizard:
+        if text.lower() == "cancel":
+            context.user_data.pop("account_wizard", None)
+            await update.message.reply_text(
+                "Account registration cancelled. You can start again from Register account."
+            )
+            return True
         step = wizard["step"]
         prompts = {
             "name": "Account nickname — send a name, for example: My Personal Account.",
