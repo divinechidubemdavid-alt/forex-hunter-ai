@@ -147,7 +147,11 @@ def _signal_text(symbol, result):
 
     score = result.get("score", 0)
     strategy_name = result.get("strategy", "Market analysis")
-    context = result.get("higher_timeframe", "Not available")
+    confirmations = result.get("higher_timeframe_confirmations") or {}
+    context = ", ".join(
+        f"{timeframe.upper()} {direction}"
+        for timeframe, direction in confirmations.items()
+    ) or "Not available"
 
     return (
         f"{text}\n\n"
@@ -315,6 +319,7 @@ async def _refresh_strong_signal_snapshot():
                 "strategy": result.get("strategy", ""),
                 "candle_time": result["candle_time"],
                 "higher_timeframe": result.get("higher_timeframe"),
+                "higher_timeframe_confirmations": result.get("higher_timeframe_confirmations", {}),
             })
             strong.append(opportunity)
             try:
@@ -445,7 +450,8 @@ async def show_strong_signals(update, context):
             f"TP2: {item.get('tp2', 'N/A')}\n"
             f"TP3: {item.get('tp3', 'N/A')}\n"
             f"Quality: {item.get('score', 0)}/100\n"
-            f"Strategy: {item.get('strategy', 'N/A')}"
+            f"Strategy: {item.get('strategy', 'N/A')}\\n"
+            f"Higher-timeframe confirmation: {', '.join(f'{tf.upper()} {direction}' for tf, direction in (item.get('higher_timeframe_confirmations') or {}).items()) or 'Unavailable'}"
         )
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"optrack:{oid}")
@@ -958,6 +964,7 @@ async def analyse_market(update, context, symbol, timeframe, trading_style="DAY"
             "trading_style": trading_style,
             "style_label": style_label(trading_style),
             "invalidation_rule": result.get("invalidation_rule"),
+            "higher_timeframe_confirmations": result.get("higher_timeframe_confirmations", {}),
             "direction": result["status"],
             "timeframe": timeframe,
             "entry": result.get("entry"),
@@ -1110,6 +1117,7 @@ async def handle_callback(update, context):
             "strategy": opportunity.get("strategy", ""),
             "candle_time": opportunity.get("candle_time"),
             "higher_timeframe": opportunity.get("higher_timeframe"),
+            "higher_timeframe_confirmations": opportunity.get("higher_timeframe_confirmations", {}),
         })
         state.mark_opportunity_claimed(opportunity_id, user_id)
         message = (
@@ -1147,6 +1155,7 @@ async def handle_callback(update, context):
             "score": pending.get("score", 0),
             "strategy": pending.get("strategy", ""),
             "candle_time": pending.get("candle_time"),
+            "higher_timeframe_confirmations": pending.get("higher_timeframe_confirmations", {}),
         }
         if style_has_trade_levels(trading_style):
             signal_record.update({
