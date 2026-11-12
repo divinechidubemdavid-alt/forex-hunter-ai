@@ -25,12 +25,32 @@ def _candles(mode, count=140):
     elif mode == "down":
         close = 2200.0 - x * 0.8
         open_price = close + 0.15
+    elif mode in {"pullback_up", "pullback_down"}:
+        if mode == "pullback_up":
+            close = 2000.0 + x * 0.8
+            open_price = close - 0.15
+        else:
+            close = 2200.0 - x * 0.8
+            open_price = close + 0.15
     else:
         close = 2000.0 + np.sin(x * 1.3) * 0.12
         open_price = close - np.cos(x * 1.3) * 0.03
 
     high = np.maximum(open_price, close) + 0.35
     low = np.minimum(open_price, close) - 0.35
+    if mode in {"pullback_up", "pullback_down"}:
+        ema9 = pd.Series(close[:-1]).ewm(span=9, adjust=False).mean().iloc[-1]
+        ema21 = pd.Series(close[:-1]).ewm(span=21, adjust=False).mean().iloc[-1]
+        if mode == "pullback_up":
+            open_price[-1] = ema9 + 0.05
+            close[-1] = ema9 + 0.15
+            low[-1] = ema21 + 0.05
+            high[-1] = close[-1] + 0.35
+        else:
+            open_price[-1] = ema9 - 0.05
+            close[-1] = ema9 - 0.15
+            high[-1] = ema21 - 0.05
+            low[-1] = close[-1] - 0.35
     index = pd.date_range(
         "2026-10-01", periods=count, freq="min", tz="UTC"
     )
@@ -63,6 +83,16 @@ class GoldConditionClassificationTests(unittest.TestCase):
         result = classify_gold_market(_candles("range"), "15m")
         self.assertEqual(result["condition"], "CONSOLIDATION / RANGE")
         self.assertEqual(result["direction"], "NEUTRAL")
+
+    def test_uptrend_pullback_to_ema_or_trendline_is_reported(self):
+        result = classify_gold_market(_candles("pullback_up"), "30m")
+        self.assertEqual(result["condition"], "PULLBACK CONTINUATION — UP")
+        self.assertEqual(result["direction"], "UP")
+
+    def test_downtrend_pullback_to_ema_or_trendline_is_reported(self):
+        result = classify_gold_market(_candles("pullback_down"), "1h")
+        self.assertEqual(result["condition"], "PULLBACK CONTINUATION — DOWN")
+        self.assertEqual(result["direction"], "DOWN")
 
     def test_rejects_insufficient_candles(self):
         with self.assertRaisesRegex(ValueError, "at least 80"):
