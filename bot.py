@@ -906,14 +906,15 @@ async def show_api_usage(chat):
 
     text = (
         "📡 API USAGE\n\n"
-        f"Date: {usage['date']} (Nigeria time)\n"
+        f"Date: {usage['date']} (UTC reset day)\n"
         f"Requests recorded today: {used:,} / {limit:,}\n"
         f"Remaining local allowance: {remaining:,}\n"
         f"Usage: {percent:.1f}%\n\n"
         "Safety notes:\n"
         "• The local daily ceiling is 800 requests.\n"
-        "• 100 request slots are reserved for manual analysis and monitoring.\n"
-        "• Automatic scanning stops at its protected allowance.\n\n"
+        "• Background monitoring stops at 700 requests to protect the reserve.\n"
+        "• 100 request slots are reserved for manual analysis.\n"
+        "• The daily counter resets at 00:00 UTC to match Twelve Data.\n\n"
         "This counter records requests made by the bot. It is not a live "
         "Twelve Data credit or billing statement."
     )
