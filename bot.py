@@ -358,7 +358,7 @@ async def show_strong_signals(update, context):
     market_scope_text = (
         "BTC/USD only (weekend mode)"
         if len(scan_markets) == 1 and scan_markets[0] == "BTC/USD"
-        else "configured forex pairs and Gold (weekday mode)"
+        else "configured forex pairs, Gold and BTC/USD (weekday mode)"
     )
     await update.message.reply_text(
         "🔄 Refreshing DAY TRADE Strong Signals across "
