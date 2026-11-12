@@ -921,7 +921,7 @@ def analyze(frame, timeframe="15m", trading_style=None):
     ):
         result["reason"] = (
             f"Trend strength too weak for {labels[primary_strategy]}: "
-            f"ADX {result['adx']:.1f}; minimum {ADX_MINIMUM:.1f}."
+            f"ADX {result['adx']:.1f}; minimum {style_minimum_adx(trading_style):.1f}."
         )
         return result
 
