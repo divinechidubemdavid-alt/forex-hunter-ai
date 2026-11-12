@@ -55,6 +55,11 @@ class GoldConditionClassificationTests(unittest.TestCase):
         self.assertEqual(result["condition"], "DOWNTREND")
         self.assertEqual(result["direction"], "DOWN")
 
+    def test_consolidation_is_reported_as_a_market_condition(self):
+        result = classify_gold_market(_candles("range"), "15m")
+        self.assertEqual(result["condition"], "CONSOLIDATION / RANGE")
+        self.assertEqual(result["direction"], "NEUTRAL")
+
     def test_rejects_insufficient_candles(self):
         with self.assertRaisesRegex(ValueError, "at least 80"):
             classify_gold_market(_candles("up", count=40), "15m")
@@ -132,6 +137,30 @@ class GoldApiScheduleTests(unittest.TestCase):
             estimated_daily_gold_requests(),
             350,
         )
+
+    def test_single_m1_feed_can_be_resampled_for_m5_and_m15(self):
+        from market_data import resample_candles
+
+        now = pd.Timestamp.now(tz="UTC").floor("min")
+        index = pd.date_range(
+            end=now - pd.Timedelta(minutes=1),
+            periods=GOLD_SOURCE_OUTPUTSIZE,
+            freq="min",
+        )
+        close = np.linspace(2000.0, 2010.0, len(index))
+        source = pd.DataFrame(
+            {
+                "open": close - 0.05,
+                "high": close + 0.20,
+                "low": close - 0.20,
+                "close": close,
+            },
+            index=index,
+        )
+        five_minute = resample_candles(source, "5m")
+        fifteen_minute = resample_candles(source, "15m")
+        self.assertGreaterEqual(len(five_minute), 300)
+        self.assertGreaterEqual(len(fifteen_minute), 100)
 
 
 if __name__ == "__main__":
