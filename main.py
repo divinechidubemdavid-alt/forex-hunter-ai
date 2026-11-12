@@ -7,6 +7,7 @@ from config import TELEGRAM_BOT_TOKEN
 from bot import register_handlers
 from auto_scanner import auto_scan_loop
 from signal_monitor import monitor_signals_loop, live_price_stream_loop
+from gold_monitor import gold_market_monitor_loop
 from economic_events_bot import economic_events_loop
 import ai_economic_intelligence
 
@@ -32,6 +33,10 @@ async def post_init(application):
     application.create_task(
         monitor_signals_loop(application),
         name="forex-hunter-signal-monitor",
+    )
+    application.create_task(
+        gold_market_monitor_loop(application),
+        name="forex-hunter-gold-market-monitor",
     )
     application.create_task(
         live_price_stream_loop(application),
