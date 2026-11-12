@@ -37,6 +37,26 @@ Technical checks use completed candles and the existing EMA/ADX/RSI/ATR and brea
 - The technical snapshot uses one representative proxy pair per event currency; affected pair biases are mapped from currency strength rather than independently scanning every pair.
 - No broker connection, order placement or automatic trade execution is implemented.
 
+## Trading styles
+
+Manual **Analyze Market** starts by asking the user to choose a style, then only that style's entry timeframes, then the market:
+
+| Style | Entry timeframes | Required completed higher-timeframe confirmation |
+|---|---|---|
+| Scalping Trade | 1m, 5m | 1m: 5m + 15m; 5m: 15m + 30m |
+| Day Trade | 15m, 30m | 1h + 4h |
+| Swing Trade | 1h, 4h, 1day | 1h: 4h + Daily; 4h: Daily; Daily: Weekly |
+
+If a required higher timeframe is missing, neutral or opposed, the engine returns **NO TRADE** rather than forcing a direction. Weekly context is derived only from enough completed daily candles; otherwise the Swing setup is blocked.
+
+All existing strategy calculations are retained and reused across the three styles. The upgrade does not delete or replace the current EMA trend, breakout/retest, Early Trend Entry, ADX, RSI, ATR or market-structure logic. Charts continue to display candlesticks, confirmed Supply and Demand zones and applicable trade-plan levels; indicator overlays remain hidden.
+
+Scalping signals deliberately contain no Stop Loss or TP1/TP2/TP3 fields. Their tracking uses completed-candle weakening/reversal monitoring and marks a setup invalidated when the existing reversal check confirms an opposing reversal. Day and Swing signals retain structural Stop Loss and TP1/TP2/TP3 management.
+
+The **Automatic Scanner** and **Strong Signals** are restricted to **DAY TRADE** only. Every new automatic signal, Strong Signal card, tracked record, monitoring alert and chart carries its trading-style label. Scalping and Swing remain available through manual Analyze Market only.
+
+BTC/USD is eligible on weekdays and weekends. On weekends, BTC/USD is the only market enabled; the other configured markets remain excluded.
+
 ## Existing safety controls
 
 - Twelve Data local ceiling: 800 requests per Nigeria calendar day.
