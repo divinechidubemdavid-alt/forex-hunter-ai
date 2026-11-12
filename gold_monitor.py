@@ -8,6 +8,8 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+import re
 
 import pandas as pd
 
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 GOLD = "XAU/USD"
 GOLD_MONITOR_LOOP_SECONDS = 60
-GOLD_SOURCE_INTERVAL_SECONDS = 6 * 60
+GOLD_SOURCE_INTERVAL_SECONDS = 8 * 60
 GOLD_SOURCE_OUTPUTSIZE = 2000
 GOLD_TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h", "4h", "1day")
 GOLD_FETCH_SCHEDULE = {
@@ -344,12 +346,26 @@ async def _analyse_and_notify(app, timeframe, frame):
 
 
 async def _fetch_gold_frame(timeframe, interval, outputsize=1500):
-    return await fetch_candles(
-        MARKETS[GOLD],
-        outputsize=outputsize,
-        interval=interval,
-        purpose="gold_monitor",
-    )
+    # The shared eight-second cooldown applies across every Twelve Data
+    # consumer. Wait for it rather than turning a temporary cooldown into
+    # a missed Gold timeframe.
+    for attempt in range(6):
+        try:
+            return await fetch_candles(
+                MARKETS[GOLD],
+                outputsize=outputsize,
+                interval=interval,
+                purpose="gold_monitor",
+            )
+        except MarketDataError as exc:
+            match = re.search(
+                r"cooldown active\\. Try again in ([0-9.]+) seconds",
+                str(exc),
+            )
+            if not match or attempt == 5:
+                raise
+            await asyncio.sleep(float(match.group(1)) + 0.25)
+    return None
 
 
 async def _gold_monitor_cycle(app, now_epoch=None):
@@ -357,8 +373,13 @@ async def _gold_monitor_cycle(app, now_epoch=None):
     if GOLD not in MARKETS:
         return
     now_epoch = time.time() if now_epoch is None else float(now_epoch)
-    # Gold is a weekday market only. No Gold API calls are made on weekends.
-    if datetime.fromtimestamp(now_epoch, tz=timezone.utc).weekday() >= 5:
+    # Gold is a weekday market only. Use Nigeria local market-session time.
+    local_now = datetime.fromtimestamp(
+        now_epoch, tz=ZoneInfo("Africa/Lagos")
+    )
+    if local_now.weekday() >= 5 or (
+        local_now.weekday() == 4 and local_now.hour >= 22
+    ):
         return
 
     retry_after = float(state.get_scanner_state("gold_monitor:retry_after", 0) or 0)
