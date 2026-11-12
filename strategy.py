@@ -1049,10 +1049,6 @@ def analyze(frame, timeframe="15m", trading_style=None):
             "score_label": "Very Strong" if score >= 90 else "Strong",
             "reason": "; ".join(reasons),
             "entry": entry,
-            "stop_loss": None,
-            "take_profits": [],
-            "risk_distance": None,
-            "risk_reward": [],
             "invalidation_rule": (
                 "Review/invalidate only when a completed entry-timeframe candle "
                 "confirms a structural reversal against the signal. No fixed "
