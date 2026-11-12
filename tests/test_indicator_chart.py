@@ -12,10 +12,10 @@ def _candles(rows=120):
     index = pd.date_range(
         "2026-10-01", periods=rows, freq="15min", tz="UTC"
     )
-    close = 1.1000 + np.linspace(0, 0.004, rows) + np.sin(
-        np.arange(rows) / 5
-    ) * 0.0005
-    open_price = np.concatenate(([close[0] - 0.0001], close[:-1]))
+    close = 1.1000 + np.linspace(0, 0.0005, rows) + np.sin(
+        np.arange(rows) * 2 * np.pi / 12
+    ) * 0.002
+    open_price = close.copy()
     return pd.DataFrame({
         "open": open_price,
         "high": np.maximum(open_price, close) + 0.0004,
