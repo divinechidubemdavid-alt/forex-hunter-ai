@@ -171,6 +171,7 @@ async def _send_signal(app, symbol, result):
         "strategy": result.get("strategy", ""),
         "candle_time": str(result.get("candle_time") or "unknown"),
         "higher_timeframe": result.get("higher_timeframe"),
+        "higher_timeframe_confirmations": result.get("higher_timeframe_confirmations", {}),
     }
     opportunity_key = _signal_key(symbol, result)
     opportunity = state.add_opportunity(opportunity_key, signal_record)
