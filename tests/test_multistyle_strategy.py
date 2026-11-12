@@ -110,5 +110,8 @@ class MultiStyleStrategyTests(unittest.TestCase):
         self.assertEqual(weekend, ["BTC/USD"])
 
 
+
+# Regression coverage: BTC/USD is intentionally weekend-only in the configured market scope.
+
 if __name__ == "__main__":
     unittest.main()
