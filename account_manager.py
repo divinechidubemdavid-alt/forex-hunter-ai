@@ -101,7 +101,7 @@ def validate_profile(profile):
     return {
         "name": name,
         "account_type": account_type,
-        "firm_name": str(profile.get("firm_name", "")).strip()[:80],
+        "firm_name": "" if account_type == "PERSONAL" else str(profile.get("firm_name", "")).strip()[:80],
         "starting_balance": balance,
         "currency": currency,
         "rules": rules,
@@ -179,7 +179,7 @@ def calculate_position_size(account_equity, risk_percent, stop_distance, value_p
     return {"risk_amount": risk_amount, "risk_percent": risk_pct, "stop_distance": distance, "lots": lots}
 
 
-def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_unit_per_lot):
+def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_unit_per_lot, positions_count=1):
     """Combine a qualified strategy setup with account-based position sizing.
 
     The supplied unit value must be verified from the user's broker contract
@@ -212,9 +212,23 @@ def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_u
         equity_source = "starting balance (no manual equity snapshot)"
     else:
         equity_source = "latest manually saved equity snapshot"
+    if isinstance(positions_count, bool):
+        raise ValueError("Number of positions must be a whole number from 1 to 20.")
+    try:
+        numeric_count = float(positions_count)
+    except (TypeError, ValueError):
+        raise ValueError("Number of positions must be a whole number from 1 to 20.")
+    if not numeric_count.is_integer() or not 1 <= numeric_count <= 20:
+        raise ValueError("Number of positions must be a whole number from 1 to 20.")
+    positions_count = int(numeric_count)
+
+    # Risk is set once for the entire signal. Positions share it; they do not
+    # multiply the user's total risk.
     sizing = calculate_position_size(
         equity, risk_percent, risk_distance, value_per_price_unit_per_lot
     )
+    per_position_risk = sizing["risk_amount"] / positions_count
+    per_position_lots = sizing["lots"] / positions_count
     return {
         "symbol": trade.get("symbol"),
         "timeframe": trade.get("timeframe"),
@@ -227,6 +241,9 @@ def calculate_account_trade_plan(profile, trade, risk_percent, value_per_price_u
         "equity_source": equity_source,
         "currency": profile.get("currency", "USD"),
         "account_name": profile.get("name", "Active account"),
+        "positions_count": positions_count,
+        "per_position_risk_amount": per_position_risk,
+        "per_position_lots": per_position_lots,
         **sizing,
     }
 
