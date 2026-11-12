@@ -849,6 +849,15 @@ async def _monitor_cycle(app):
                         await _check_one_signal(
                             app, user_id, current, candle, candle_time
                         )
+                        if str(current.get("trading_style", "")).upper() == "SCALPING":
+                            # Re-evaluate each unseen completed scalp candle
+                            # from the already-fetched shared frame; no extra
+                            # Twelve Data request is made.
+                            current = state.get_signal(_signal_id(signal), user_id)
+                            if current and current.get("status") == "TRACKING":
+                                await _check_trend_warning(
+                                    app, user_id, current, frame.loc[:candle_time]
+                                )
 
                     current = state.get_signal(_signal_id(signal), user_id)
                     if current and current.get("status") == "TRACKING":
