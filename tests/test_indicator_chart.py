@@ -48,15 +48,14 @@ class IndicatorChartTests(unittest.TestCase):
     def test_chart_uses_the_strategy_engines_indicator_columns(self):
         indicators = calculate_indicators(_candles())
         for column in (
-            "ema9", "ema21", "rsi", "adx",
+            "ema9", "ema21", "ema50", "rsi", "adx",
             "plus_di", "minus_di", "atr",
             "support", "resistance",
         ):
             self.assertIn(column, indicators.columns)
         self.assertTrue(np.isfinite(indicators["ema9"].iloc[-1]))
         self.assertTrue(np.isfinite(indicators["ema21"].iloc[-1]))
-        ema50 = indicators["close"].ewm(span=50, adjust=False).mean()
-        self.assertTrue(np.isfinite(ema50.iloc[-1]))
+        self.assertTrue(np.isfinite(indicators["ema50"].iloc[-1]))
         self.assertTrue(np.isfinite(indicators["rsi"].iloc[-1]))
         self.assertTrue(np.isfinite(indicators["adx"].iloc[-1]))
         self.assertTrue(np.isfinite(indicators["atr"].iloc[-1]))
