@@ -24,6 +24,67 @@ from account_manager import (
 MENU_LABEL = "🛡 Account Manager"
 
 
+async def _begin_signal_position_plan(message, context, user_id, trade):
+    """Start account-aware sizing from a qualified signal; this never places orders."""
+    active = state.get_active_account(user_id)
+    if not active:
+        await message.reply_text(
+            "Register and select an account in Account Manager before calculating a position plan."
+        )
+        return
+    if str(trade.get("status", "")).upper() not in {"BUY", "SELL"}:
+        await message.reply_text("This signal has no qualified BUY or SELL direction.")
+        return
+    targets = trade.get("take_profits") or []
+    if len(targets) != 3 or trade.get("entry") is None or trade.get("stop_loss") is None:
+        await message.reply_text("This signal does not contain complete entry, stop-loss and TP1–TP3 levels for sizing.")
+        return
+
+    snapshot = active.get("snapshot") or {}
+    equity = snapshot.get("equity")
+    equity_source = "manual equity snapshot" if equity is not None else "starting balance (no snapshot)"
+    if snapshot.get("updated_at"):
+        try:
+            updated = datetime.fromisoformat(str(snapshot["updated_at"]).replace("Z", "+00:00"))
+            age_hours = (datetime.now(ZoneInfo("UTC")) - updated).total_seconds() / 3600
+            if age_hours > 24:
+                await message.reply_text(
+                    f"Your saved equity snapshot is {age_hours:.1f} hours old. Update balance and equity before sizing this signal."
+                )
+                return
+        except (TypeError, ValueError):
+            await message.reply_text("Your saved equity timestamp is invalid. Update balance and equity before sizing.")
+            return
+
+    settings = state.get_user_settings(user_id)
+    try:
+        risk_pct = float(settings.get("risk_percent", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        risk_pct = 1.0
+    risk_note = f"Risk preference: {risk_pct:g}%."
+    if risk_pct > 5.0:
+        risk_pct = 5.0
+        risk_note = "Your saved risk preference is above the planner's 5% safety ceiling; this plan is capped at 5%."
+
+    context.user_data["account_plan_pending"] = {
+        "trade": trade,
+        "account_id": active["id"],
+        "risk_percent": risk_pct,
+        "equity": float(equity if equity is not None else active["starting_balance"]),
+        "equity_source": equity_source,
+        "risk_note": risk_note,
+        "awaiting_positions_count": True,
+    }
+    await message.reply_text(
+        f"ACCOUNT-AWARE PLAN — {trade.get('symbol', 'Market')} {trade['status']}\n"
+        f"Account: {active['name']}\n"
+        f"Risk budget: {risk_pct:g}% of equity for the entire signal.\n\n"
+        "How many separate positions do you want to open for this one signal? "
+        "Send a whole number from 1 to 20. The total risk will be shared across all positions, not multiplied.\n"
+        "This is a sizing plan only. It will not place an order."
+    )
+
+
 def _home_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Register account", callback_data="account:register")],
@@ -164,6 +225,39 @@ async def handle_account_callback(update, context):
                 await query.message.reply_photo(photo=image, caption=f"📈 {symbol} | {timeframe.upper()}\nLast completed candle: {candles.index[-1]}\nMarket structure annotations included. Verify broker prices before trading.")
             except (MarketDataError, ValueError) as exc:
                 await query.message.reply_text(f"Chart unavailable: {exc}")
+    elif action.startswith("plan-manual:"):
+        signal_key = action.split(":", 1)[1]
+        signal = context.user_data.get(signal_key)
+        if not signal:
+            await query.message.reply_text("This signal is no longer available. Run the analysis again.")
+        else:
+            trade = {
+                "status": signal.get("direction"),
+                "symbol": signal.get("symbol"),
+                "timeframe": signal.get("timeframe"),
+                "entry": signal.get("entry"),
+                "stop_loss": signal.get("stop_loss"),
+                "take_profits": signal.get("take_profits"),
+            }
+            await _begin_signal_position_plan(query.message, context, user_id, trade)
+    elif action.startswith("plan-opportunity:"):
+        opportunity_id = action.split(":", 1)[1]
+        item = state.get_opportunity(opportunity_id)
+        if not item:
+            await query.message.reply_text("This opportunity is no longer available.")
+        else:
+            targets = item.get("take_profits") or [
+                item.get("tp1"), item.get("tp2"), item.get("tp3")
+            ]
+            trade = {
+                "status": item.get("direction"),
+                "symbol": item.get("symbol"),
+                "timeframe": item.get("timeframe", "15m"),
+                "entry": item.get("entry"),
+                "stop_loss": item.get("stop_loss"),
+                "take_profits": targets,
+            }
+            await _begin_signal_position_plan(query.message, context, user_id, trade)
     elif action == "planner":
         active = state.get_active_account(user_id)
         if not active:
