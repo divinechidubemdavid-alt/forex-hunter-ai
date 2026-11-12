@@ -321,6 +321,10 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(analysis["market_biases"]["EUR/USD"], "SELL")
         self.assertEqual(analysis["market_biases"]["USD/JPY"], "BUY")
         self.assertEqual(analysis["market_biases"]["XAU/USD"], "SELL")
+        self.assertEqual(
+            set(analysis["market_biases"]),
+            {"EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"},
+        )
 
 
     def test_legacy_bls_timezone_alias_resolves_to_new_york(self):

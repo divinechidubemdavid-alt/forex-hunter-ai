@@ -1,6 +1,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -83,8 +84,8 @@ def _markets_for_cycle(now):
     """
     Return every currently eligible market for this scan cycle.
 
-    Gold is checked first, then the six forex pairs in a rotating
-    order, followed by BTC/USD. Weekends remain BTC/USD-only.
+    Gold is checked first, then the three retained forex pairs in a
+    rotating order. Weekends remain BTC/USD-only.
     No eligible market is skipped merely because another market
     has priority.
     """
@@ -258,6 +259,27 @@ async def _send_signal(app, symbol, result):
     return delivered
 
 
+async def _fetch_scanner_frame(symbol):
+    purpose = "gold_monitor" if symbol == GOLD else "auto"
+    for attempt in range(5):
+        try:
+            return await fetch_candles(
+                MARKETS[symbol],
+                outputsize=500,
+                interval="15m",
+                purpose=purpose,
+            )
+        except MarketDataError as exc:
+            match = re.search(
+                r"Try again in ([0-9.]+) seconds",
+                str(exc),
+            )
+            if not match or attempt == 4:
+                raise
+            await asyncio.sleep(float(match.group(1)) + 0.25)
+    return None
+
+
 async def _scan_market(app, symbol):
     currently_eligible = _eligible_markets(datetime.now(WAT))
     if symbol not in currently_eligible:
@@ -275,12 +297,7 @@ async def _scan_market(app, symbol):
         return
 
     try:
-        frame = await fetch_candles(
-            MARKETS[symbol],
-            outputsize=500,
-            interval="15m",
-            purpose="auto",
-        )
+        frame = await _fetch_scanner_frame(symbol)
 
         result = analyze(
             frame,

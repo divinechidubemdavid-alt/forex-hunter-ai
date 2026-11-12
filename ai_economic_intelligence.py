@@ -17,6 +17,7 @@ import httpx
 import economic_events as ee
 import economic_research as research
 import state
+from config import WEEKDAY_MARKETS
 
 log = logging.getLogger(__name__)
 WAT = ZoneInfo("Africa/Lagos")
@@ -263,11 +264,13 @@ def _combine(ai: dict, technical: str | None) -> dict:
     reasons.extend(ai.get("risk_factors", [])[:4])
     currency = str(ai.get("currency") or "USD").upper()
     pairs = {
-        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "XAU/USD"],
+        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"],
         "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
-        "AUD": ["AUD/USD"], "CAD": ["USD/CAD"], "CHF": ["USD/CHF"],
         "XAU": ["XAU/USD"],
     }.get(currency, [])
+    # Economic-event directional outputs follow the weekday trading universe.
+    # BTC/USD is reserved for weekend trading and retired pairs are excluded.
+    pairs = [pair for pair in pairs if pair in WEEKDAY_MARKETS]
     market_biases = {}
     for pair in pairs:
         base, quote = pair.split("/")

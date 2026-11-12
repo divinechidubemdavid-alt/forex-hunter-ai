@@ -5,13 +5,14 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
 from config import (
     STATE_FILE,
     TWELVE_DATA_DAILY_CREDIT_LIMIT,
     MIN_REQUEST_INTERVAL_SECONDS,
     API_RESERVE_REQUESTS,
+    GOLD_BUDGET_SHARE,
+    MARKETS,
 )
 
 _lock = threading.RLock()
@@ -22,13 +23,16 @@ def _now():
 
 
 def _today():
-    return datetime.now(ZoneInfo("Africa/Lagos")).date().isoformat()
+    # Twelve Data Basic's 800-credit daily quota resets at 00:00 UTC.
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def _empty_state():
     return {
         "date": _today(),
         "api_requests": 0,
+        "api_gold_monitor_requests": 0,
+        "api_other_background_requests": 0,
         "last_request_epoch": 0.0,
         "last_alerts": {},
         "users": {},
@@ -45,6 +49,30 @@ def _empty_state():
         "next_opportunity_id": 1,
         "account_profiles": {},
     }
+
+
+def _api_counter_needs_reset(data):
+    today = _today()
+    try:
+        last_epoch = float(data.get("last_request_epoch", 0.0))
+    except (TypeError, ValueError):
+        last_epoch = 0.0
+
+    if last_epoch > 0:
+        last_request_day = datetime.fromtimestamp(
+            last_epoch, timezone.utc
+        ).date().isoformat()
+        return last_request_day != today
+
+    return data.get("date") != today
+
+
+def _reset_api_counters(data):
+    data["date"] = _today()
+    data["api_requests"] = 0
+    data["api_gold_monitor_requests"] = 0
+    data["api_other_background_requests"] = 0
+    data["last_request_epoch"] = 0.0
 
 
 def _load_state():
@@ -73,10 +101,12 @@ def _load_state():
         if key not in data or not isinstance(data[key], type(default)):
             data[key] = default
 
-    if data.get("date") != _today():
+    if _api_counter_needs_reset(data):
+        _reset_api_counters(data)
+    else:
+        # Migrate the old Nigeria-local date field to the provider's UTC day
+        # without discarding requests already made during this UTC day.
         data["date"] = _today()
-        data["api_requests"] = 0
-        data["last_request_epoch"] = 0.0
 
     return data
 
@@ -99,10 +129,10 @@ def _save():
 
 
 def _refresh_daily_counter():
-    if _state.get("date") != _today():
+    if _api_counter_needs_reset(_state):
+        _reset_api_counters(_state)
+    else:
         _state["date"] = _today()
-        _state["api_requests"] = 0
-        _state["last_request_epoch"] = 0.0
 
 
 # ---------------------------------------------------------
@@ -123,19 +153,42 @@ def reserve_api_request(purpose='manual'):
         limit = int(TWELVE_DATA_DAILY_CREDIT_LIMIT)
         used = int(_state.get("api_requests", 0))
 
-        purpose = str(purpose).lower()
-        if purpose == "auto":
-            automatic_limit = max(0, limit - int(API_RESERVE_REQUESTS))
-            if used >= automatic_limit:
+        purpose = str(purpose).strip().lower()
+
+        # Split the 700-request background pool into a protected 50/50
+        # allocation: Gold multi-timeframe monitoring and all other
+        # background work (automatic scanner + tracked-signal monitoring).
+        # The final 100 slots remain available for manual requests.
+        background_purposes = {"auto", "monitor", "gold_monitor"}
+        background_limit = max(0, limit - int(API_RESERVE_REQUESTS))
+        if purpose in background_purposes:
+            if used >= background_limit:
                 return False, (
-                    "Automatic scanner paused to protect the reserved "
-                    "daily API allowance for manual analysis and monitoring."
+                    "Background market monitoring paused to protect the "
+                    "reserved daily API allowance for manual analysis."
                 )
+
+            gold_limit = int(background_limit * float(GOLD_BUDGET_SHARE))
+            other_limit = background_limit - gold_limit
+            if purpose == "gold_monitor":
+                gold_used = int(_state.get("api_gold_monitor_requests", 0))
+                if gold_used >= gold_limit:
+                    return False, (
+                        "Gold monitoring reached its protected daily API "
+                        "allocation. It will resume after the UTC reset."
+                    )
+            else:
+                other_used = int(_state.get("api_other_background_requests", 0))
+                if other_used >= other_limit:
+                    return False, (
+                        "Other background monitoring reached its protected "
+                        "daily API allocation. Manual requests remain reserved."
+                    )
 
         if used >= limit:
             return False, (
                 "Daily API safety limit reached. "
-                "The counter resets at midnight Nigeria time."
+                "The counter resets at midnight UTC."
             )
 
         now = time.time()
@@ -149,6 +202,14 @@ def reserve_api_request(purpose='manual'):
             )
 
         _state["api_requests"] = used + 1
+        if purpose == "gold_monitor":
+            _state["api_gold_monitor_requests"] = int(
+                _state.get("api_gold_monitor_requests", 0)
+            ) + 1
+        elif purpose in background_purposes:
+            _state["api_other_background_requests"] = int(
+                _state.get("api_other_background_requests", 0)
+            ) + 1
         _state["last_request_epoch"] = now
         _save()
 
@@ -166,6 +227,16 @@ def get_api_usage():
             "used": used,
             "limit": limit,
             "remaining": max(0, limit - used),
+            "gold_monitor_used": int(_state.get("api_gold_monitor_requests", 0)),
+            "other_background_used": int(_state.get("api_other_background_requests", 0)),
+            "background_limit": max(0, limit - int(API_RESERVE_REQUESTS)),
+            "gold_monitor_limit": int(
+                max(0, limit - int(API_RESERVE_REQUESTS)) * float(GOLD_BUDGET_SHARE)
+            ),
+            "other_background_limit": (
+                max(0, limit - int(API_RESERVE_REQUESTS))
+                - int(max(0, limit - int(API_RESERVE_REQUESTS)) * float(GOLD_BUDGET_SHARE))
+            ),
             "date": _state["date"],
         }
 
@@ -181,16 +252,13 @@ def ensure_user(user_id):
         user = _state["users"].setdefault(key, {})
 
         user.setdefault("monitoring_enabled", True)
-        user.setdefault("markets", [
-            "XAU/USD",
-            "EUR/USD",
-            "GBP/USD",
-            "USD/JPY",
-            "AUD/USD",
-            "USD/CAD",
-            "USD/CHF",
-            "BTC/USD",
-        ])
+        user.setdefault("markets", list(MARKETS))
+        # Remove retired markets from old saved preferences without touching
+        # the user's other profile, risk, or performance data.
+        if isinstance(user.get("markets"), list):
+            user["markets"] = [
+                symbol for symbol in user["markets"] if symbol in MARKETS
+            ]
         user.setdefault("notifications", {
             "new_signals": True,
             "tp1": True,
@@ -198,6 +266,7 @@ def ensure_user(user_id):
             "tp3": True,
             "stop_loss": True,
             "weakening": True,
+            "gold_updates": True,
             "system": True,
         })
         user.setdefault("tracking_notification_mode", "silent")
@@ -234,6 +303,11 @@ def update_user_setting(user_id, setting, value):
     with _lock:
         key = str(user_id)
         user = _state["users"].setdefault(key, {})
+        if setting == "markets":
+            value = [
+                symbol for symbol in (value or [])
+                if symbol in MARKETS
+            ]
         user[setting] = value
         _save()
         return dict(user)

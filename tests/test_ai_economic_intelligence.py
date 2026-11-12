@@ -29,6 +29,10 @@ class AIEconomicIntelligenceTests(unittest.TestCase):
         self.assertLess(combined["confidence"], 70)
         self.assertEqual(combined["market_biases"]["EUR/USD"], "SELL")
         self.assertEqual(combined["market_biases"]["USD/JPY"], "BUY")
+        self.assertEqual(
+            set(combined["market_biases"]),
+            {"EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"},
+        )
 
     def test_inconclusive_evidence_does_not_create_a_fundamental_trade_direction(self):
         result = ai._validate_result({

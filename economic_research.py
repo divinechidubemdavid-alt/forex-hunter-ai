@@ -241,8 +241,7 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
 def _market_for_currency(currency: str) -> str | None:
     return {
         "USD": "EUR/USD", "EUR": "EUR/USD", "GBP": "GBP/USD",
-        "JPY": "USD/JPY", "AUD": "AUD/USD", "CAD": "USD/CAD",
-        "CHF": "USD/CHF", "XAU": "XAU/USD",
+        "JPY": "USD/JPY", "XAU": "XAU/USD",
     }.get(str(currency).upper())
 
 async def technical_snapshot(event: dict, checkpoint: str) -> dict:
@@ -257,7 +256,10 @@ async def technical_snapshot(event: dict, checkpoint: str) -> dict:
     timeframe = "5m" if checkpoint in {"15m", "5m"} else "15m"
     try:
         frame = await market_data.fetch_candles(
-            market, outputsize=180, interval=timeframe, purpose="auto"
+            market,
+            outputsize=180,
+            interval=timeframe,
+            purpose="gold_monitor" if market == "XAU/USD" else "auto",
         )
         data = calculate_indicators(frame).dropna()
         if len(data) < 40:

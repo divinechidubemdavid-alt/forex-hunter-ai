@@ -99,12 +99,19 @@ class MultiStyleStrategyTests(unittest.TestCase):
         self.assertEqual(AUTOMATIC_TRADING_STYLE, "DAY")
         self.assertEqual(STRONG_SIGNALS_TRADING_STYLE, "DAY")
 
-    def test_btc_is_available_on_weekdays_and_only_market_on_weekends(self):
+    def test_btc_is_weekend_only_and_weekdays_use_four_retained_markets(self):
         weekday = auto_scanner._eligible_markets(pd.Timestamp("2026-11-09 12:00", tz="Africa/Lagos"))
         weekend = auto_scanner._eligible_markets(pd.Timestamp("2026-11-14 12:00", tz="Africa/Lagos"))
-        self.assertIn("BTC/USD", weekday)
+        self.assertEqual(
+            weekday,
+            ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY"],
+        )
+        self.assertNotIn("BTC/USD", weekday)
         self.assertEqual(weekend, ["BTC/USD"])
 
+
+
+# Regression coverage: BTC/USD is intentionally weekend-only in the configured market scope.
 
 if __name__ == "__main__":
     unittest.main()

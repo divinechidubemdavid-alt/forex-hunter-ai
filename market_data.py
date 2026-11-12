@@ -33,6 +33,11 @@ class MarketDataError(Exception):
     """Raised when market data cannot safely be used."""
 
 
+def maximum_candle_age_minutes(duration):
+    """A completed candle remains valid for its interval plus provider delay."""
+    return duration.total_seconds() / 60 + MAX_CANDLE_AGE_MINUTES
+
+
 def _normalise_timeframe(timeframe):
     value = str(timeframe).strip().lower()
 
@@ -92,10 +97,14 @@ def _process_candles(values, timeframe):
         now - (frame.index[-1] + duration)
     ).total_seconds() / 60
 
-    # Allow a little extra time for provider publication delays.
-    if latest_age > MAX_CANDLE_AGE_MINUTES:
+    # Higher-timeframe candles naturally close less frequently. Apply
+    # the freshness allowance to one full candle duration plus the provider
+    # publication buffer; otherwise valid 1h/4h/Daily candles are rejected.
+    maximum_age_minutes = maximum_candle_age_minutes(duration)
+    if latest_age > maximum_age_minutes:
         raise ValueError(
-            f"Market data is stale ({latest_age:.1f} minutes old)."
+            f"Market data is stale ({latest_age:.1f} minutes old; "
+            f"maximum {maximum_age_minutes:.1f})."
         )
 
     return frame

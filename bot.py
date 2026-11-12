@@ -263,7 +263,7 @@ async def _fetch_strong_market_frame(symbol):
                 MARKETS[symbol],
                 outputsize=500,
                 interval="15m",
-                purpose="auto",
+                purpose="gold_monitor" if symbol == "XAU/USD" else "auto",
             )
         except MarketDataError as exc:
             match = re.search(
@@ -658,7 +658,7 @@ async def _show_signal_detail(chat, user_id, signal_id):
             MARKETS[signal["symbol"]],
             outputsize=100,
             interval=timeframe,
-            purpose="monitor",
+            purpose="gold_monitor" if signal["symbol"] == "XAU/USD" else "monitor",
         )
         latest_chart_price = float(frame["close"].iloc[-1])
         caption = caption.replace(
@@ -905,18 +905,26 @@ async def show_api_usage(chat):
     remaining = usage["remaining"]
     percent = (used / limit * 100) if limit else 0
 
+    gold_used = usage.get("gold_monitor_used", 0)
+    gold_limit = usage.get("gold_monitor_limit", 0)
+    other_used = usage.get("other_background_used", 0)
+    other_limit = usage.get("other_background_limit", 0)
+
     text = (
         "📡 API USAGE\n\n"
-        f"Date: {usage['date']} (Nigeria time)\n"
+        f"Date: {usage['date']} (UTC reset day)\n"
         f"Requests recorded today: {used:,} / {limit:,}\n"
         f"Remaining local allowance: {remaining:,}\n"
         f"Usage: {percent:.1f}%\n\n"
-        "Safety notes:\n"
-        "• The local daily ceiling is 800 requests.\n"
-        "• 100 request slots are reserved for manual analysis and monitoring.\n"
-        "• Automatic scanning stops at its protected allowance.\n\n"
-        "This counter records requests made by the bot. It is not a live "
-        "Twelve Data credit or billing statement."
+        "PROTECTED DAILY ALLOCATIONS\n"
+        f"• Gold market requests (scanner + monitoring): {gold_used:,} / {gold_limit:,}\n"
+        f"• Other background work: {other_used:,} / {other_limit:,}\n"
+        "• Manual request reserve: 100 requests\n"
+        "• Shared minimum request interval: 8 seconds\n"
+        "• Daily counter resets at 00:00 UTC.\n\n"
+        "Gold receives 50% of the background API allocation. "
+        "This local counter is a safety estimate, not a live "
+        "Twelve Data billing statement."
     )
 
     keyboard = InlineKeyboardMarkup([[

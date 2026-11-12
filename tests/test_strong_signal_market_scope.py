@@ -13,20 +13,16 @@ MARKETS = {
     "EUR/USD": "EUR/USD",
     "GBP/USD": "GBP/USD",
     "USD/JPY": "USD/JPY",
-    "AUD/USD": "AUD/USD",
-    "USD/CAD": "USD/CAD",
-    "USD/CHF": "USD/CHF",
     "BTC/USD": "BTC/USD",
 }
 
 WEEKDAY_EXPECTED = [
     "XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY",
-    "AUD/USD", "USD/CAD", "USD/CHF", "BTC/USD",
 ]
 
 
 class MarketSessionScopeTests(unittest.TestCase):
-    def test_weekdays_include_forex_gold_and_bitcoin(self):
+    def test_weekdays_include_gold_and_three_retained_forex_pairs(self):
         for weekday in range(5):
             with self.subTest(weekday=weekday):
                 self.assertEqual(get_session_markets(MARKETS, weekday), WEEKDAY_EXPECTED)
@@ -43,7 +39,7 @@ class MarketSessionScopeTests(unittest.TestCase):
         self.assertEqual(get_strong_signal_markets(MARKETS, 5), ["BTC/USD"])
 
     def test_session_membership_rejects_cross_session_markets(self):
-        self.assertTrue(is_market_allowed("BTC/USD", 0))
+        self.assertFalse(is_market_allowed("BTC/USD", 0))
         self.assertFalse(is_market_allowed("EUR/USD", 5))
         self.assertFalse(is_market_allowed("XAU/USD", 6))
         self.assertTrue(is_market_allowed("BTC/USD", 6))
