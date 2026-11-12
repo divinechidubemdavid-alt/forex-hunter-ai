@@ -36,6 +36,8 @@ def normalise_account_type(value):
         "FUNDED_PROP": "FUNDED_PROP",
         "FUNDED PROP": "FUNDED_PROP",
         "FUNDED ACCOUNT": "FUNDED_PROP",
+        "INSTANT FUNDING": "FUNDED_PROP",
+        "PROP FIRM INSTANT FUNDING": "FUNDED_PROP",
     }
     try:
         return aliases[text]
