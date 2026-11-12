@@ -58,7 +58,7 @@ PARTIAL_EXIT_FRACTIONS = (1 / 3, 1 / 3, 1 / 3)
 # This is a local ceiling, not a claim about provider credit pricing.
 TWELVE_DATA_DAILY_CREDIT_LIMIT = 800
 
-# Reserve 100 local request slots for manual analysis and monitoring.
+# Reserve 100 local request slots for manual analysis.
 API_RESERVE_REQUESTS = 100
 
 # Market-data settings.
