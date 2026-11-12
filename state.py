@@ -77,12 +77,12 @@ def _load_state():
         if key not in data or not isinstance(data[key], type(default)):
             data[key] = default
 
-    if data.get("date") != _today():
+    if _api_counter_needs_reset(data):
+        _reset_api_counters(data)
+    else:
+        # Migrate the old Nigeria-local date field to the provider's UTC day
+        # without discarding requests already made during this UTC day.
         data["date"] = _today()
-        data["api_requests"] = 0
-        data["api_gold_monitor_requests"] = 0
-        data["api_other_background_requests"] = 0
-        data["last_request_epoch"] = 0.0
 
     return data
 
@@ -104,13 +104,35 @@ def _save():
     os.replace(temporary, STATE_FILE)
 
 
+def _api_counter_needs_reset(data):
+    today = _today()
+    try:
+        last_epoch = float(data.get("last_request_epoch", 0.0))
+    except (TypeError, ValueError):
+        last_epoch = 0.0
+
+    if last_epoch > 0:
+        last_request_day = datetime.fromtimestamp(
+            last_epoch, timezone.utc
+        ).date().isoformat()
+        return last_request_day != today
+
+    return data.get("date") != today
+
+
+def _reset_api_counters(data):
+    data["date"] = _today()
+    data["api_requests"] = 0
+    data["api_gold_monitor_requests"] = 0
+    data["api_other_background_requests"] = 0
+    data["last_request_epoch"] = 0.0
+
+
 def _refresh_daily_counter():
-    if _state.get("date") != _today():
+    if _api_counter_needs_reset(_state):
+        _reset_api_counters(_state)
+    else:
         _state["date"] = _today()
-        _state["api_requests"] = 0
-        _state["api_gold_monitor_requests"] = 0
-        _state["api_other_background_requests"] = 0
-        _state["last_request_epoch"] = 0.0
 
 
 # ---------------------------------------------------------
