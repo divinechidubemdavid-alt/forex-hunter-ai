@@ -17,6 +17,9 @@ from trading_styles import (
     required_higher_timeframes,
     style_has_trade_levels,
     style_label,
+    style_score_profile,
+    style_minimum_score,
+    style_minimum_adx,
 )
 
 
@@ -623,106 +626,63 @@ def _move_is_extended(last, direction):
     )
     return extension > 1.60
 
-def _calculate_score(last, previous, direction, strategy):
-    """Calculate setup quality, not probability of winning."""
-
+def _calculate_score(last, previous, direction, strategy, trading_style="DAY"):
+    """Score shared evidence using each style's own priority weights."""
+    weights = style_score_profile(trading_style)
     score = 0
     reasons = []
-
-    # ADX trend strength: 20 points.
     adx = _safe_float(last["adx"])
-
-    if adx >= 35:
-        score += 20
-        reasons.append("Strong ADX trend")
-    elif adx >= 25:
-        score += 16
-        reasons.append("Good ADX trend")
-    elif adx >= ADX_MINIMUM:
-        score += 12
-        reasons.append("Acceptable ADX")
+    adx_points = 20 if adx >= 35 else 16 if adx >= 25 else 12 if adx >= ADX_MINIMUM else 0
+    score += adx_points / 20 * weights["adx"]
+    if adx_points:
+        reasons.append("Strong ADX trend" if adx >= 35 else "Good ADX trend" if adx >= 25 else "Acceptable ADX")
     else:
         reasons.append("Weak trend strength")
-
-    # EMA alignment: 15 points.
     if direction == "BUY":
-        ema_aligned = (
-            last["ema9"] > last["ema21"]
-            and last["plus_di"] > last["minus_di"]
-        )
+        ema_aligned = last["ema9"] > last["ema21"] and last["plus_di"] > last["minus_di"]
     else:
-        ema_aligned = (
-            last["ema9"] < last["ema21"]
-            and last["minus_di"] > last["plus_di"]
-        )
-
+        ema_aligned = last["ema9"] < last["ema21"] and last["minus_di"] > last["plus_di"]
     if ema_aligned:
-        score += 15
+        score += weights["ema"]
         reasons.append("EMA and directional alignment")
-
-    # RSI: 10 points.
     rsi = _safe_float(last["rsi"])
-
+    rsi_points = 0
     if direction == "BUY" and 50 <= rsi <= 68:
-        score += 10
+        rsi_points = 10
         reasons.append("Bullish RSI confirmation")
     elif direction == "SELL" and 32 <= rsi <= 50:
-        score += 10
+        rsi_points = 10
         reasons.append("Bearish RSI confirmation")
     elif direction == "BUY" and 68 < rsi < 75:
-        score += 5
+        rsi_points = 5
         reasons.append("RSI elevated")
     elif direction == "SELL" and 25 < rsi < 32:
-        score += 5
+        rsi_points = 5
         reasons.append("RSI depressed")
-
-    # Closed candle confirmation: 10 points.
+    score += rsi_points / 10 * weights["rsi"]
     if _candle_confirmation(last, direction):
-        score += 10
+        score += weights["candle"]
         reasons.append("Closed candle confirmation")
-
-    # Strategy-specific evidence: 20 points.
+    setup_points = 0
     if strategy == "EMA_TREND":
-        if (
-            previous["ema9"] > previous["ema21"]
-            and last["ema9"] > last["ema21"]
-            and direction == "BUY"
-        ) or (
-            previous["ema9"] < previous["ema21"]
-            and last["ema9"] < last["ema21"]
-            and direction == "SELL"
-        ):
-            score += 20
+        if ((previous["ema9"] > previous["ema21"] and last["ema9"] > last["ema21"] and direction == "BUY") or (previous["ema9"] < previous["ema21"] and last["ema9"] < last["ema21"] and direction == "SELL")):
+            setup_points = 20
             reasons.append("EMA trend continuation")
-
     elif strategy == "BREAKOUT_RETEST":
-        score += 20
+        setup_points = 20
         reasons.append("Breakout and retest confirmed")
-
-    # Volatility: 10 points.
+    score += setup_points / 20 * weights["setup"]
     atr = _safe_float(last["atr"])
     price = abs(_safe_float(last["close"]))
-
     if atr > 0 and price > 0:
-        volatility_ratio = atr / price
-
-        if volatility_ratio > 0:
-            score += 10
-            reasons.append("Usable market volatility")
-
-    # Directional movement: 15 points.
+        score += weights["volatility"]
+        reasons.append("Usable market volatility")
     plus_di = _safe_float(last["plus_di"])
     minus_di = _safe_float(last["minus_di"])
-
-    if direction == "BUY" and plus_di > minus_di:
-        score += 15
-        reasons.append("Positive directional movement")
-
-    elif direction == "SELL" and minus_di > plus_di:
-        score += 15
-        reasons.append("Negative directional movement")
-
-    return min(score, MAXIMUM_SCORE), reasons
+    if (direction == "BUY" and plus_di > minus_di) or (direction == "SELL" and minus_di > plus_di):
+        score += weights["directional"]
+        reasons.append("Positive directional movement" if direction == "BUY" else "Negative directional movement")
+    return min(round(score), MAXIMUM_SCORE), reasons
 
 
 def _technical_stop(data, direction, entry, atr):
@@ -957,7 +917,7 @@ def analyze(frame, timeframe="15m", trading_style=None):
     # Only Early Trend Entry may qualify while ADX is still developing.
     if (
         primary_strategy != "EARLY_TREND_ENTRY"
-        and result["adx"] < ADX_MINIMUM
+        and result["adx"] < style_minimum_adx(trading_style)
     ):
         result["reason"] = (
             f"Trend strength too weak for {labels[primary_strategy]}: "
@@ -981,7 +941,7 @@ def analyze(frame, timeframe="15m", trading_style=None):
     else:
         strategy = labels[primary_strategy]
         score, reasons = _calculate_score(
-            last, previous, direction, primary_strategy
+            last, previous, direction, primary_strategy, trading_style
         )
 
     if (
@@ -1025,7 +985,7 @@ def analyze(frame, timeframe="15m", trading_style=None):
         score = min(100, score + 5)
         reasons.append("1H context supports entry direction")
 
-    if score < MINIMUM_SCORE:
+    if score < style_minimum_score(trading_style):
         if primary_strategy == "EARLY_TREND_ENTRY":
             result["signal_stage"] = "EARLY_WATCH"
         result["score"] = score
@@ -1036,7 +996,7 @@ def analyze(frame, timeframe="15m", trading_style=None):
         )
         result["reason"] = (
             f"Setup score {score}/100 is below the "
-            f"70-point qualification threshold. "
+            f"{style_minimum_score(trading_style)}-point qualification threshold. "
             + "; ".join(reasons)
         )
         return result
