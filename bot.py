@@ -916,7 +916,7 @@ async def show_api_usage(chat):
         f"Remaining local allowance: {remaining:,}\n"
         f"Usage: {percent:.1f}%\n\n"
         "PROTECTED DAILY ALLOCATIONS\n"
-        f"• Gold multi-timeframe monitoring: {gold_used:,} / {gold_limit:,}\n"
+        f"• Gold market requests (scanner + monitoring): {gold_used:,} / {gold_limit:,}\n"
         f"• Other background work: {other_used:,} / {other_limit:,}\n"
         "• Manual request reserve: 100 requests\n"
         "• Shared minimum request interval: 8 seconds\n"
