@@ -11,6 +11,9 @@ import matplotlib.patches as patches
 import numpy as np
 import pandas as pd
 
+from config import ADX_MINIMUM
+from strategy import calculate_indicators
+
 
 BACKGROUND = "#080B0A"
 PANEL = "#101613"
@@ -206,6 +209,8 @@ def create_market_chart(
     entry=None,
     stop_loss=None,
     take_profits=None,
+    strategy=None,
+    signal_stage=None,
 ):
     """
     Generate a PNG candlestick chart with market-structure overlays.
@@ -221,7 +226,8 @@ def create_market_chart(
     if any(column not in candles.columns for column in required):
         raise ValueError("Candle data is missing OHLC values.")
 
-    data = candles.tail(80).copy()
+    # Use the strategy engine as the single source of truth for every plotted indicator.
+    data = calculate_indicators(candles).tail(80).copy()
 
     for column in required:
         data[column] = pd.to_numeric(
@@ -240,10 +246,15 @@ def create_market_chart(
     if data.index.tz is not None:
         data.index = data.index.tz_convert("UTC").tz_localize(None)
 
-    fig, ax = plt.subplots(figsize=(13, 7))
+    fig, axes = plt.subplots(
+        4, 1, figsize=(13, 10), sharex=True,
+        gridspec_kw={"height_ratios": [4.2, 1.1, 1.1, 1.0]},
+    )
+    ax, rsi_ax, adx_ax, atr_ax = axes
 
     fig.patch.set_facecolor(BACKGROUND)
-    ax.set_facecolor(PANEL)
+    for panel_ax in axes:
+        panel_ax.set_facecolor(PANEL)
 
     x_values = mdates.date2num(data.index.to_pydatetime())
 
@@ -293,7 +304,53 @@ def create_market_chart(
 
         ax.add_patch(body)
 
+    # Overlay the exact EMA values calculated by strategy.calculate_indicators().
+    ax.plot(x_values, data["ema9"], color=GREEN, linewidth=1.35, label="EMA 9", zorder=4)
+    ax.plot(x_values, data["ema21"], color=GOLD, linewidth=1.35, label="EMA 21", zorder=4)
+
+    latest = data.iloc[-1]
+    for column, label, color in (("support", "SUPPORT", GREEN), ("resistance", "RESISTANCE", RED)):
+        level = float(latest.get(column, np.nan))
+        if np.isfinite(level):
+            ax.axhline(level, color=color, linestyle=":", linewidth=0.9, alpha=0.8, label=f"{label}: {level:g}")
+
+    # RSI panel: momentum context, not a standalone buy/sell trigger.
+    rsi_ax.plot(x_values, data["rsi"], color=GOLD, linewidth=1.15, label="RSI 14")
+    for level in (30, 50, 70):
+        rsi_ax.axhline(level, color=MUTED, linestyle=":" if level != 50 else "--", linewidth=0.7, alpha=0.65)
+    rsi_ax.set_ylim(0, 100)
+    rsi_ax.set_ylabel("RSI", color=TEXT, fontsize=8)
+    rsi_value = float(latest["rsi"])
+    rsi_ax.set_title(f"RSI 14  |  {rsi_value:.1f}", color=GOLD, fontsize=9, loc="left", pad=3)
+
+    # ADX and directional indicators: strength plus direction.
+    adx_ax.plot(x_values, data["adx"], color=GOLD, linewidth=1.1, label="ADX 14")
+    adx_ax.plot(x_values, data["plus_di"], color=GREEN, linewidth=0.9, label="+DI")
+    adx_ax.plot(x_values, data["minus_di"], color=RED, linewidth=0.9, label="-DI")
+    adx_ax.axhline(ADX_MINIMUM, color=MUTED, linestyle=":", linewidth=0.8, alpha=0.8)
+    adx_ax.set_ylabel("ADX / DI", color=TEXT, fontsize=8)
+    adx_ax.set_title(
+        f"ADX {float(latest['adx']):.1f}  |  +DI {float(latest['plus_di']):.1f}  |  -DI {float(latest['minus_di']):.1f}  |  strength guide {ADX_MINIMUM:g}",
+        color=GOLD, fontsize=9, loc="left", pad=3,
+    )
+    adx_ax.legend(loc="upper right", fontsize=7, ncol=3, facecolor=BACKGROUND, edgecolor="#344238", labelcolor=TEXT)
+
+    # ATR panel: volatility measurement, not direction.
+    atr_ax.plot(x_values, data["atr"], color="#8DB8FF", linewidth=1.05, label="ATR 14")
+    atr_ax.set_ylabel("ATR", color=TEXT, fontsize=8)
+    atr_ax.set_title(f"ATR 14  |  {float(latest['atr']):g}", color="#8DB8FF", fontsize=9, loc="left", pad=3)
+
     _draw_market_annotations(ax, data, x_values)
+    if strategy:
+        tag = str(strategy).upper()
+        if signal_stage:
+            tag += f"  |  {str(signal_stage).replace('_', ' ')}"
+        ax.text(
+            0.985, 0.975, tag, transform=ax.transAxes,
+            ha="right", va="top", color=GOLD, fontsize=8, fontweight="bold",
+            bbox={"boxstyle": "round,pad=0.3", "fc": BACKGROUND, "ec": GOLD, "alpha": 0.92},
+            zorder=11,
+        )
 
     levels = [
         ("ENTRY", entry, GOLD),
@@ -332,11 +389,11 @@ def create_market_chart(
         pad=16,
     )
 
-    ax.set_xlabel("CANDLE TIME (UTC)", color=MUTED)
+    atr_ax.set_xlabel("CANDLE TIME (UTC)", color=MUTED)
     ax.set_ylabel("PRICE", color=MUTED)
 
-    ax.xaxis_date()
-    ax.xaxis.set_major_formatter(
+    atr_ax.xaxis_date()
+    atr_ax.xaxis.set_major_formatter(
         mdates.DateFormatter("%m-%d %H:%M")
     )
 
@@ -348,29 +405,17 @@ def create_market_chart(
         dtype=int,
     )
 
-    ax.set_xticks(x_values[tick_positions])
-    ax.tick_params(
-        axis="x",
-        colors=TEXT,
-        labelrotation=25,
-        labelsize=8,
-    )
-    ax.tick_params(axis="y", colors=TEXT, labelsize=9)
-
-    for spine in ax.spines.values():
-        spine.set_color("#27332C")
-
-    ax.grid(
-        True,
-        color="#26332B",
-        linestyle=":",
-        linewidth=0.7,
-        alpha=0.7,
-    )
+    atr_ax.set_xticks(x_values[tick_positions])
+    atr_ax.tick_params(axis="x", colors=TEXT, labelrotation=25, labelsize=8)
+    for panel_ax in axes:
+        panel_ax.tick_params(axis="y", colors=TEXT, labelsize=8)
+        for spine in panel_ax.spines.values():
+            spine.set_color("#27332C")
+        panel_ax.grid(True, color="#26332B", linestyle=":", linewidth=0.6, alpha=0.65)
 
     legend = ax.legend(
-        loc="best",
-        fontsize=8,
+        loc="upper left",
+        fontsize=7,
         facecolor=BACKGROUND,
         edgecolor="#344238",
     )
