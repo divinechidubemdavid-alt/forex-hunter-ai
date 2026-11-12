@@ -494,9 +494,10 @@ async def show_strong_signals(update, context):
             f"Strategy: {item.get('strategy', 'N/A')}\\n"
             f"Higher-timeframe confirmation: {', '.join(f'{tf.upper()} {direction}' for tf, direction in (item.get('higher_timeframe_confirmations') or {}).items()) or 'Unavailable'}"
         )
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"optrack:{oid}")
-        ]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"optrack:{oid}")],
+            [InlineKeyboardButton("🧮 CALCULATE POSITION SIZE", callback_data=f"account:plan-opportunity:{oid}")],
+        ])
         chart = STRONG_SIGNAL_CHARTS.get(str(oid))
         if chart is not None:
             chart.seek(0)
@@ -996,12 +997,10 @@ async def analyse_market(update, context, symbol, timeframe, trading_style="DAY"
             f"manual-{user_id}-"
             f"{int(datetime.now().timestamp())}"
         )
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton(
-                "📌 TRACK THIS SIGNAL",
-                callback_data=f"track:{signal_id}",
-            )
-        ]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📌 TRACK THIS SIGNAL", callback_data=f"track:{signal_id}")],
+            [InlineKeyboardButton("🧮 CALCULATE POSITION SIZE", callback_data=f"account:plan-manual:{signal_id}")],
+        ])
         context.user_data[signal_id] = {
             "symbol": symbol,
             "trading_style": trading_style,
