@@ -314,7 +314,7 @@ async def handle_account_text(update, context):
                     raise ValueError("Send STATIC or TRAILING.")
             else:
                 value = text.strip()
-            wizard[key] = value
+            wizard[step] = value
             sequence = account_registration_steps(wizard.get("account_type"))
             next_index = sequence.index(step) + 1
             if next_index < len(sequence):
