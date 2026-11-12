@@ -45,5 +45,39 @@ class ManualStyleFlowKeyboardTests(unittest.TestCase):
         )
 
 
+    def test_menu_navigation_clears_pending_numeric_and_wizard_inputs(self):
+        class Context:
+            user_data = {
+                "account_risk_pending": True,
+                "account_plan_pending": {"risk_percent": 1.0},
+                "account_snapshot_id": "account-1",
+                "account_wizard": {"step": "starting_balance"},
+                "awaiting_custom_risk": True,
+                "econ_awaiting": "actual:event-1",
+                "report_date_range": {"type": "history"},
+                "unrelated_preference": "keep",
+            }
+
+        context = Context()
+        cleared = bot._reset_pending_input_for_menu_navigation(
+            context, "🔎 Market Scanner"
+        )
+
+        self.assertEqual(set(cleared), set(bot.PENDING_INPUT_KEYS))
+        self.assertEqual(context.user_data, {"unrelated_preference": "keep"})
+
+    def test_regular_text_does_not_cancel_a_pending_input(self):
+        class Context:
+            user_data = {"account_risk_pending": True}
+
+        context = Context()
+        cleared = bot._reset_pending_input_for_menu_navigation(
+            context, "5000 | 1 | 2.5 | 10"
+        )
+
+        self.assertEqual(cleared, [])
+        self.assertTrue(context.user_data["account_risk_pending"])
+
+
 if __name__ == "__main__":
     unittest.main()
