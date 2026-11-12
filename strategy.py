@@ -1246,4 +1246,4 @@ def format_signal(symbol, result):
         "",
         "Manual analysis only. No broker orders are placed.",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
