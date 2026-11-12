@@ -87,7 +87,7 @@ PLACE_BROKER_ORDERS = False
 GOLD_BUDGET_SHARE = 0.50
 
 # Single source of truth for session eligibility.
-# Weekday session: supported forex pairs plus Gold.
+# Weekday session: supported forex pairs, Gold and BTC/USD.
 WEEKDAY_MARKETS = (
     "XAU/USD",
     "EUR/USD",
@@ -96,6 +96,7 @@ WEEKDAY_MARKETS = (
     "AUD/USD",
     "USD/CAD",
     "USD/CHF",
+    "BTC/USD",
 )
 
 # Weekend session: Bitcoin only.

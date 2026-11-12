@@ -12,6 +12,12 @@ from config import (
 )
 
 from market_data import resample_candles
+from trading_styles import (
+    normalise_trading_style,
+    required_higher_timeframes,
+    style_has_trade_levels,
+    style_label,
+)
 
 
 # ============================================================
@@ -745,31 +751,62 @@ def _technical_stop(data, direction, entry, atr):
     return stop
 
 
-def _higher_timeframe_context(frame):
-    """Assess 1H trend when sufficient data is available."""
+def _weekly_candles(frame):
+    """Aggregate completed daily candles into completed weekly candles."""
+    required = ["open", "high", "low", "close"]
+    if frame is None or frame.empty or any(c not in frame.columns for c in required):
+        return pd.DataFrame(columns=required)
+    candles = frame[required].copy()
+    if not isinstance(candles.index, pd.DatetimeIndex):
+        return pd.DataFrame(columns=required)
+    if candles.index.tz is None:
+        candles.index = candles.index.tz_localize("UTC")
+    candles = candles.sort_index()
+    weekly = candles.resample("W-MON", label="left", closed="left").agg({
+        "open": "first", "high": "max", "low": "min", "close": "last",
+    }).dropna()
+    now = pd.Timestamp.now(tz="UTC")
+    return weekly[weekly.index + pd.Timedelta(days=7) <= now]
 
+
+def _timeframe_context(frame, timeframe):
+    """Read a completed higher-timeframe EMA trend; fail closed if data is thin."""
     try:
-        higher = resample_candles(frame, "1h")
-        higher = calculate_indicators(higher).dropna()
-
-        if len(higher) < 30:
+        higher = _weekly_candles(frame) if timeframe == "1week" else resample_candles(frame, timeframe)
+        if higher is None or higher.empty or len(higher) < 25:
             return "UNAVAILABLE"
-
-        last = higher.iloc[-1]
-
-        if last["ema9"] > last["ema21"]:
+        close = pd.to_numeric(higher["close"], errors="coerce").dropna()
+        if len(close) < 25:
+            return "UNAVAILABLE"
+        ema_fast = close.ewm(span=9, adjust=False, min_periods=9).mean()
+        ema_slow = close.ewm(span=21, adjust=False, min_periods=21).mean()
+        fast_value = _safe_float(ema_fast.iloc[-1])
+        slow_value = _safe_float(ema_slow.iloc[-1])
+        if fast_value is None or slow_value is None:
+            return "UNAVAILABLE"
+        if fast_value > slow_value:
             return "BULLISH"
-
-        if last["ema9"] < last["ema21"]:
+        if fast_value < slow_value:
             return "BEARISH"
-
         return "NEUTRAL"
-
     except Exception:
         return "UNAVAILABLE"
 
 
-def analyze(frame, timeframe="15m"):
+def _higher_timeframe_context(frame):
+    """Backward-compatible 1H context used by older reports."""
+    return _timeframe_context(frame, "1h")
+
+
+def _higher_timeframe_confirmations(frame, trading_style, timeframe):
+    """Return required higher-timeframe directions for this trading style."""
+    confirmations = {}
+    for higher_timeframe in required_higher_timeframes(trading_style, timeframe):
+        confirmations[higher_timeframe] = _timeframe_context(frame, higher_timeframe)
+    return confirmations
+
+
+def analyze(frame, timeframe="15m", trading_style=None):
     """
     Analyze market data.
 
@@ -777,6 +814,20 @@ def analyze(frame, timeframe="15m"):
     previous bot's basic analysis interface.
     """
 
+    timeframe = str(timeframe).lower()
+    if trading_style is None:
+        inferred_style = {
+            "1m": "SCALPING", "5m": "SCALPING",
+            "15m": "DAY", "30m": "DAY",
+            "1h": "SWING", "4h": "SWING", "1day": "SWING", "1d": "SWING",
+        }.get(timeframe, "DAY")
+        trading_style = inferred_style
+    trading_style = normalise_trading_style(trading_style)
+    if timeframe == "1d":
+        timeframe = "1day"
+
+    # Reject invalid style/timeframe combinations before market-data analysis.
+    required_higher_timeframes(trading_style, timeframe)
     data = resample_candles(frame, timeframe)
     data = calculate_indicators(data).dropna()
 
@@ -785,6 +836,8 @@ def analyze(frame, timeframe="15m"):
         "reason": "",
         "symbol": None,
         "timeframe": timeframe,
+        "trading_style": trading_style,
+        "style_label": style_label(trading_style),
         "strategy": None,
         "signal_stage": "WAIT",
         "score": 0,
@@ -800,6 +853,8 @@ def analyze(frame, timeframe="15m"):
         "ema9": None,
         "ema21": None,
         "higher_timeframe": "UNAVAILABLE",
+        "higher_timeframe_confirmations": {},
+        "invalidation_rule": None,
         "candles": data,
     }
 
@@ -812,6 +867,9 @@ def analyze(frame, timeframe="15m"):
     last = data.iloc[-1]
     previous = data.iloc[-2]
 
+    confirmations = _higher_timeframe_confirmations(
+        frame, trading_style, timeframe
+    )
     result.update({
         "candle_time": data.index[-1].isoformat(),
         "adx": _safe_float(last["adx"]),
@@ -819,7 +877,8 @@ def analyze(frame, timeframe="15m"):
         "atr": _safe_float(last["atr"]),
         "ema9": _safe_float(last["ema9"]),
         "ema21": _safe_float(last["ema21"]),
-        "higher_timeframe": _higher_timeframe_context(frame),
+        "higher_timeframe": confirmations.get("1h", "UNAVAILABLE"),
+        "higher_timeframe_confirmations": confirmations,
     })
 
     atr = _safe_float(last["atr"])
@@ -936,28 +995,35 @@ def analyze(frame, timeframe="15m"):
         reasons.append(f"{labels[primary_strategy]} setup identified")
 
 
-    # Higher timeframe context adjusts the score.
+    # Every style must agree with all of its required completed higher
+    # timeframes. Missing, neutral or opposing context means NO TRADE.
+    confirmations = result["higher_timeframe_confirmations"]
+    expected_context = "BULLISH" if direction == "BUY" else "BEARISH"
+    unavailable = [
+        tf for tf, context in confirmations.items()
+        if context == "UNAVAILABLE"
+    ]
+    conflicting = [
+        tf for tf, context in confirmations.items()
+        if context != expected_context
+    ]
+    if unavailable or conflicting:
+        result["reason"] = (
+            "Higher-timeframe confirmation is insufficient. "
+            + (f"Unavailable: {', '.join(unavailable)}. " if unavailable else "")
+            + (f"Not aligned with {direction}: " + ", ".join(
+                f"{tf}={confirmations[tf]}" for tf in conflicting
+            ) + "." if conflicting else "")
+            + "No trade signal was issued."
+        )
+        result["signal_stage"] = "HTF_UNCONFIRMED"
+        return result
+
+    # Retain the existing 1H score adjustment when that context is available.
     context = result["higher_timeframe"]
-
-    if (
-        context == "BULLISH" and direction == "SELL"
-    ) or (
-        context == "BEARISH" and direction == "BUY"
-    ):
-        score = max(0, score - 10)
-        reasons.append(
-            "1H context conflicts with entry direction"
-        )
-
-    elif (
-        context == "BULLISH" and direction == "BUY"
-    ) or (
-        context == "BEARISH" and direction == "SELL"
-    ):
+    if context == expected_context:
         score = min(100, score + 5)
-        reasons.append(
-            "1H context supports entry direction"
-        )
+        reasons.append("1H context supports entry direction")
 
     if score < MINIMUM_SCORE:
         if primary_strategy == "EARLY_TREND_ENTRY":
@@ -973,6 +1039,30 @@ def analyze(frame, timeframe="15m"):
             f"70-point qualification threshold. "
             + "; ".join(reasons)
         )
+        return result
+
+    if not style_has_trade_levels(trading_style):
+        # Scalping deliberately has no Stop Loss or TP1/TP2/TP3 fields.
+        # Its tracked management uses completed-candle reversal warnings.
+        for field in ("stop_loss", "take_profits", "risk_distance", "risk_reward"):
+            result.pop(field, None)
+        result.update({
+            "status": direction,
+            "signal_stage": (
+                "EARLY_ENTRY" if primary_strategy == "EARLY_TREND_ENTRY"
+                else "CONFIRMED"
+            ),
+            "strategy": strategy,
+            "score": score,
+            "score_label": "Very Strong" if score >= 90 else "Strong",
+            "reason": "; ".join(reasons),
+            "entry": entry,
+            "invalidation_rule": (
+                "Review/invalidate only when a completed entry-timeframe candle "
+                "confirms a structural reversal against the signal. No fixed "
+                "Stop Loss or take-profit levels are issued for Scalping."
+            ),
+        })
         return result
 
     stop_loss = _technical_stop(
@@ -1112,39 +1202,54 @@ def format_signal(symbol, result):
     def price(value):
         return f"{float(value):.{digits}f}"
 
+    trading_style = result.get("trading_style", "DAY")
+    label = result.get("style_label", style_label(trading_style))
+    confirmations = result.get("higher_timeframe_confirmations") or {}
+    confirmation_text = ", ".join(
+        f"{tf.upper()} {direction}" for tf, direction in confirmations.items()
+    ) or str(result.get("higher_timeframe", "UNAVAILABLE"))
+
     if status == "WAIT":
         return (
-            f"FOREX HUNTER AI\n"
+            f"FOREX HUNTER AI — {label}\n"
             f"Market: {symbol}\n"
             f"Timeframe: {timeframe}\n"
             f"Status: WAIT\n"
-            f"Stage: {result.get('signal_stage', 'WAIT')}\n\n"
+            f"Stage: {result.get('signal_stage', 'WAIT')}\n"
+            f"Higher-timeframe confirmation: {confirmation_text}\n\n"
             f"Reason: {result.get('reason', 'No setup.')}\n\n"
             "Analysis only. No orders have been placed."
         )
 
-    targets = result["take_profits"]
-
-    return (
-        f"FOREX HUNTER AI — {status}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"Market: {symbol}\n"
-        f"Direction: {status}\n"
-        f"Timeframe: {timeframe}\n"
-        f"Strategy: {result.get('strategy')}\n"
-        f"Entry stage: {result.get('signal_stage', 'CONFIRMED')}\n"
-        f"Setup score: {result.get('score')}/100 "
-        f"({result.get('score_label')})\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"Entry: {price(result['entry'])}\n"
-        f"Stop Loss: {price(result['stop_loss'])}\n"
-        f"TP1 (1R): {price(targets[0])}\n"
-        f"TP2 (2R): {price(targets[1])}\n"
-        f"TP3 (3R): {price(targets[2])}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"ADX: {result.get('adx', 0):.1f}\n"
-        f"RSI: {result.get('rsi', 0):.1f}\n"
-        f"1H Context: {result.get('higher_timeframe')}\n"
-        f"Explanation: {result.get('reason')}\n\n"
-        "Manual analysis only. No broker orders are placed."
-    )
+    targets = result.get("take_profits") or []
+    lines = [
+        f"FOREX HUNTER AI — {label} — {status}",
+        "━━━━━━━━━━━━━━━━━━",
+        f"Market: {symbol}",
+        f"Direction: {status}",
+        f"Timeframe: {timeframe}",
+        f"Strategy: {result.get('strategy')}",
+        f"Entry stage: {result.get('signal_stage', 'CONFIRMED')}",
+        f"Setup score: {result.get('score')}/100 ({result.get('score_label')})",
+        "━━━━━━━━━━━━━━━━━━",
+        f"Entry: {price(result['entry'])}",
+    ]
+    if style_has_trade_levels(trading_style):
+        lines.extend([
+            f"Stop Loss: {price(result['stop_loss'])}",
+            f"TP1 (1R): {price(targets[0])}",
+            f"TP2 (2R): {price(targets[1])}",
+            f"TP3 (3R): {price(targets[2])}",
+        ])
+    else:
+        lines.append(f"Management: {result.get('invalidation_rule')}")
+    lines.extend([
+        "━━━━━━━━━━━━━━━━━━",
+        f"Higher-timeframe confirmation: {confirmation_text}",
+        f"ADX: {result.get('adx', 0):.1f}",
+        f"RSI: {result.get('rsi', 0):.1f}",
+        f"Explanation: {result.get('reason')}",
+        "",
+        "Manual analysis only. No broker orders are placed.",
+    ])
+    return "\n".join(lines)

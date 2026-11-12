@@ -9,6 +9,8 @@ import matplotlib.patches as patches
 import numpy as np
 import pandas as pd
 
+from trading_styles import style_label
+
 
 BACKGROUND = "#080B0A"
 PANEL = "#101613"
@@ -102,6 +104,7 @@ def create_market_chart(
     take_profits=None,
     strategy=None,
     signal_stage=None,
+    trading_style=None,
 ):
     """
     Generate a clean PNG candlestick chart with supply and demand zones only.
@@ -180,6 +183,12 @@ def create_market_chart(
             ax.axhline(price, color=color, linestyle="--", linewidth=1.05, alpha=0.9, label=f"{label}: {price:g}")
 
     title = f"{symbol}  |  {timeframe.upper()}"
+    if trading_style:
+        try:
+            label = style_label(trading_style)
+        except ValueError:
+            label = str(trading_style)
+        title += f"  |  {label}"
     if strategy:
         title += f"  |  {str(strategy).upper()}"
     if signal_stage:

@@ -15,6 +15,7 @@ from config import TWELVE_DATA_API_KEY
 import websockets
 from strategy import assess_trend_health
 from chart import create_market_chart
+from trading_styles import style_label
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,16 @@ PRICE_STREAM_URL = "wss://ws.twelvedata.com/v1/quotes/price"
 PRICE_STREAM_HEARTBEAT_SECONDS = 10
 PRICE_STREAM_RECONNECT_MAX_SECONDS = 60
 PARTIAL_FRACTION = 1.0 / 3.0
+
+
+def _style_label_for_signal(signal):
+    value = signal.get("trading_style")
+    if not value:
+        return "LEGACY / UNKNOWN"
+    try:
+        return style_label(value)
+    except ValueError:
+        return "LEGACY / UNKNOWN"
 
 
 def _number(value):
@@ -131,6 +142,25 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
     if direction not in ("BUY", "SELL"):
         return
 
+    signal_time = _timestamp(signal.get("candle_time"))
+    checked_time = _timestamp(signal.get("last_checked"))
+    current_time = _timestamp(candle_time)
+    if current_time is None:
+        return
+    if signal_time is not None and current_time <= signal_time:
+        return
+    if checked_time is not None and current_time <= checked_time:
+        return
+
+    if str(signal.get("trading_style", "")).upper() == "SCALPING":
+        # Scalping has no Stop Loss or TP levels. Record candle progress and
+        # let the reversal monitor evaluate completed-candle invalidation.
+        state.update_signal(signal_id, {
+            "current_price": _number(candle.get("close")),
+            "last_checked": str(candle_time),
+        })
+        return
+
     entry = _number(signal.get("entry"))
     stop = _number(signal.get("stop_loss"))
     targets = _targets(signal)
@@ -149,17 +179,6 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
     candle_close = _number(candle.get("close"))
 
     if candle_high is None or candle_low is None or candle_close is None:
-        return
-
-    signal_time = _timestamp(signal.get("candle_time"))
-    checked_time = _timestamp(signal.get("last_checked"))
-    current_time = _timestamp(candle_time)
-
-    if current_time is None:
-        return
-    if signal_time is not None and current_time <= signal_time:
-        return
-    if checked_time is not None and current_time <= checked_time:
         return
 
     settings = state.get_user_settings(user_id) or {}
@@ -215,7 +234,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         )
         await _notify(
             app, user_id, settings, "system",
-            f"⚠️ {signal.get('symbol', 'Signal')}: outcome is ambiguous. "
+            f"⚠️ {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: outcome is ambiguous. "
             "The stop loss and a new target were both touched in one "
             "candle. Please review the chart.",
         )
@@ -245,7 +264,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
         )
         await _notify(
             app, user_id, settings, "stop_loss",
-            f"🛑 {signal.get('symbol', 'Signal')}: stop loss reached. "
+            f"🛑 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: stop loss reached. "
             f"Realised result: {realised:+.2f}R.",
         )
         return
@@ -304,7 +323,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
                     )],
                 ])
             message = (
-                f"🎯 {signal.get('symbol', 'Signal')}: TP{target_number} reached. "
+                f"🎯 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: TP{target_number} reached. "
                 f"One-third partial exit recorded. Realised result: {realised:+.2f}R."
             )
             if keyboard:
@@ -345,6 +364,15 @@ async def _check_one_price(app, user_id, signal, quote):
 
     direction = str(signal.get("direction") or "").upper()
     if direction not in {"BUY", "SELL"}:
+        return
+
+    if str(signal.get("trading_style", "")).upper() == "SCALPING":
+        # Quotes update the display only; scalp exits are not represented as
+        # hidden price-based Stop Loss or take-profit levels.
+        state.update_signal(signal_id, {
+            "current_price": _number(quote.get("bid") or quote.get("price")),
+            "last_price_timestamp": datetime.now(timezone.utc).isoformat(),
+        })
         return
 
     # A long position exits on bid; a short position exits on ask.
@@ -421,7 +449,7 @@ async def _check_one_price(app, user_id, signal, quote):
         )
         await _notify(
             app, user_id, settings, "system",
-            f"⚠️ {signal.get('symbol', 'Signal')}: price gap crossed both a target "
+            f"⚠️ {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: price gap crossed both a target "
             "and stop loss between quotes. Outcome marked ambiguous for review.",
         )
         return
@@ -446,7 +474,7 @@ async def _check_one_price(app, user_id, signal, quote):
         )
         await _notify(
             app, user_id, settings, "stop_loss",
-            f"🛑 {signal.get('symbol', 'Signal')}: stop loss reached. "
+            f"🛑 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: stop loss reached. "
             f"Live quote: {price:g}. Realised result: {realised:+.2f}R.",
         )
         return
@@ -499,7 +527,7 @@ async def _check_one_price(app, user_id, signal, quote):
                 )],
             ])
         message = (
-            f"🎯 {signal.get('symbol', 'Signal')}: TP{number} reached. "
+            f"🎯 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Signal')}: TP{number} reached. "
             f"Live quote: {price:g}. One-third partial exit recorded. "
             f"Realised result: {realised:+.2f}R."
         )
@@ -618,16 +646,34 @@ async def _check_trend_warning(app, user_id, signal, frame):
 
     # One alert per continuous warning episode, not one alert per candle.
     warning_key = warning["type"]
+    warning_time = _timestamp(warning.get("candle_time"))
+    signal_time = _timestamp(signal.get("candle_time"))
+    previous_warning_time = _timestamp(signal.get("trend_warning_candle_time"))
+    if signal_time is not None and warning_time is not None and warning_time <= signal_time:
+        return
+    if previous_warning_time is not None and warning_time is not None and warning_time <= previous_warning_time:
+        return
     if previous_warning == warning_key:
         return
 
-    state.update_signal(signal_id, {"trend_warning_key": warning_key})
+    state.update_signal(signal_id, {
+        "trend_warning_key": warning_key,
+        "trend_warning_candle_time": warning.get("candle_time"),
+    })
     state.add_signal_event(
         signal_id,
         warning["type"],
         warning["message"],
         {"candle_time": warning["candle_time"]},
     )
+    is_scalping = str(signal.get("trading_style", "")).upper() == "SCALPING"
+    if is_scalping and warning["type"] == "TREND_REVERSAL_WARNING":
+        state.complete_signal(
+            signal_id,
+            "INVALIDATED",
+            "Scalping setup invalidated by a confirmed completed-candle "
+            "reversal warning. No Stop Loss or take-profit levels were used.",
+        )
     settings = state.get_user_settings(user_id) or {}
     mode = str(settings.get("tracking_notification_mode", "silent")).lower()
     if mode not in {"important", "all"}:
@@ -644,16 +690,17 @@ async def _check_trend_warning(app, user_id, signal, frame):
             stop_loss=signal.get("stop_loss"),
             take_profits=_targets(signal),
             strategy=signal.get("strategy"),
+            trading_style=signal.get("trading_style") or "LEGACY / UNKNOWN",
         )
         chart.seek(0)
         latest = float(frame["close"].iloc[-1])
         caption = (
-            f"⚠️ TREND WEAKENING / REVERSAL RISK\n"
+            f"⚠️ {_style_label_for_signal(signal)} — TREND WEAKENING / REVERSAL RISK\n"
             f"{signal.get('symbol', 'Tracked signal')} — {signal.get('direction', '')}\n"
             f"Signal #{signal_id} | {timeframe.upper()}\n"
             f"Latest closed-candle price: {latest:g}\n"
             f"{warning['message']}\n\n"
-            "Chart shows the latest completed candles and saved trade levels. "
+            "Chart shows the latest completed candles and the applicable style information. "
             "This is a warning, not a confirmed reversal."
         )[:950]
         await app.bot.send_photo(chat_id=int(user_id), photo=chart, caption=caption)
@@ -661,7 +708,7 @@ async def _check_trend_warning(app, user_id, signal, frame):
         logger.exception("Could not send trend-warning chart for signal %s.", signal_id)
         await _notify(
             app, user_id, settings, "trend_warning",
-            f"⚠️ {signal.get('symbol', 'Tracked signal')} — {warning['message']}\n"
+            f"⚠️ {_style_label_for_signal(signal)} — {signal.get('symbol', 'Tracked signal')} — {warning['message']}\n"
             "⚠️ Warning chart could not be generated this time.",
         )
 
@@ -684,20 +731,25 @@ async def _refresh_saved_chart(app, user_id, signal, frame):
             stop_loss=signal.get("stop_loss"),
             take_profits=_targets(signal),
             strategy=signal.get("strategy"),
+            trading_style=signal.get("trading_style") or "LEGACY / UNKNOWN",
         )
         chart.seek(0)
         latest = float(frame["close"].iloc[-1])
         caption = (
-            f"📈 {signal.get('symbol', 'Unknown')} — {signal.get('direction', 'N/A')}\n"
+            f"📈 {_style_label_for_signal(signal)} — {signal.get('symbol', 'Unknown')} — {signal.get('direction', 'N/A')}\n"
             f"Signal #{signal_id} | {timeframe.upper()}\n"
             f"Latest closed-candle price: {latest:g}\n"
-            f"Entry: {signal.get('entry', 'N/A')} | SL: {signal.get('stop_loss', 'N/A')}\n"
-            f"TP1: {signal.get('tp1', 'N/A')} | TP2: {signal.get('tp2', 'N/A')} | "
-            f"TP3: {signal.get('tp3', 'N/A')}\n"
-            f"Progress: {'✓' if signal.get('tp1_hit') else '○'} TP1  "
-            f"{'✓' if signal.get('tp2_hit') else '○'} TP2  "
-            f"{'✓' if signal.get('tp3_hit') else '○'} TP3\n"
-            f"Status: {signal.get('status', 'TRACKING')}\n"
+            + (
+                f"Entry: {signal.get('entry', 'N/A')} | SL: {signal.get('stop_loss', 'N/A')}\n"
+                f"TP1: {signal.get('tp1', 'N/A')} | TP2: {signal.get('tp2', 'N/A')} | "
+                f"TP3: {signal.get('tp3', 'N/A')}\n"
+                f"Progress: {'✓' if signal.get('tp1_hit') else '○'} TP1  "
+                f"{'✓' if signal.get('tp2_hit') else '○'} TP2  "
+                f"{'✓' if signal.get('tp3_hit') else '○'} TP3\n"
+                if str(signal.get("trading_style", "")).upper() != "SCALPING"
+                else "Management: completed-candle reversal / invalidation monitoring\n"
+            )
+            + f"Status: {signal.get('status', 'TRACKING')}\n"
             "Updated from completed candles. Not a tick-by-tick live feed."
         )[:950]
         keyboard = InlineKeyboardMarkup([
@@ -797,6 +849,15 @@ async def _monitor_cycle(app):
                         await _check_one_signal(
                             app, user_id, current, candle, candle_time
                         )
+                        if str(current.get("trading_style", "")).upper() == "SCALPING":
+                            # Re-evaluate each unseen completed scalp candle
+                            # from the already-fetched shared frame; no extra
+                            # Twelve Data request is made.
+                            current = state.get_signal(_signal_id(signal), user_id)
+                            if current and current.get("status") == "TRACKING":
+                                await _check_trend_warning(
+                                    app, user_id, current, frame.loc[:candle_time]
+                                )
 
                     current = state.get_signal(_signal_id(signal), user_id)
                     if current and current.get("status") == "TRACKING":
