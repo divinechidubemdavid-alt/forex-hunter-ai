@@ -263,7 +263,7 @@ async def _fetch_strong_market_frame(symbol):
                 MARKETS[symbol],
                 outputsize=500,
                 interval="15m",
-                purpose="auto",
+                purpose="gold_monitor" if symbol == "XAU/USD" else "auto",
             )
         except MarketDataError as exc:
             match = re.search(
@@ -657,7 +657,7 @@ async def _show_signal_detail(chat, user_id, signal_id):
             MARKETS[signal["symbol"]],
             outputsize=100,
             interval=timeframe,
-            purpose="monitor",
+            purpose="gold_monitor" if signal["symbol"] == "XAU/USD" else "monitor",
         )
         latest_chart_price = float(frame["close"].iloc[-1])
         caption = caption.replace(
