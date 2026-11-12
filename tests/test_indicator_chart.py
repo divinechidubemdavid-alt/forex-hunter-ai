@@ -55,6 +55,8 @@ class IndicatorChartTests(unittest.TestCase):
             self.assertIn(column, indicators.columns)
         self.assertTrue(np.isfinite(indicators["ema9"].iloc[-1]))
         self.assertTrue(np.isfinite(indicators["ema21"].iloc[-1]))
+        ema50 = indicators["close"].ewm(span=50, adjust=False).mean()
+        self.assertTrue(np.isfinite(ema50.iloc[-1]))
         self.assertTrue(np.isfinite(indicators["rsi"].iloc[-1]))
         self.assertTrue(np.isfinite(indicators["adx"].iloc[-1]))
         self.assertTrue(np.isfinite(indicators["atr"].iloc[-1]))
