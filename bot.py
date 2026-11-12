@@ -157,7 +157,7 @@ def _signal_text(symbol, result):
         f"{text}\n\n"
         f"Strategy: {strategy_name}\n"
         f"Quality score: {score}/100\n"
-        f"1H context: {context}\n\n"
+        f"Higher-timeframe confirmation: {context}\n\n"
         "The score measures setup quality. "
         "It is not a guaranteed win probability."
     )
@@ -301,7 +301,7 @@ async def _refresh_strong_signal_snapshot():
             targets = list(raw_targets) if isinstance(raw_targets, (list, tuple)) else [raw_targets]
             key = (
                 f"adaptive-signal:{symbol}:15m:"
-                f"{result['status']}:{result['candle_time']}"
+                f"{result['status']}:{result['candle_time']}:DAY"
             )
             opportunity = state.add_opportunity(key, {
                 "symbol": symbol,
@@ -515,6 +515,7 @@ async def _send_tracked_signals(chat, user_id):
             f"Market: {signal.get('symbol', 'N/A')}\n"
             f"Direction: {signal.get('direction', 'N/A')}\n"
             f"Timeframe: {signal.get('timeframe', 'N/A')}\n"
+            f"Higher-timeframe confirmation: {', '.join(f'{tf.upper()} {direction}' for tf, direction in (signal.get('higher_timeframe_confirmations') or {}).items()) or 'Unavailable'}\n"
             f"Entry: {signal.get('entry', 'N/A')}\n"
             f"Current price: {signal.get('current_price', 'Not updated')}\n"
             + (
@@ -566,7 +567,8 @@ async def _show_signal_detail(chat, user_id, signal_id):
     caption = (
         f"📈 {_signal_style_label(signal)} — {signal.get('symbol', 'Unknown')} — "
         f"{signal.get('direction', 'N/A')}\n"
-        f"Signal #{signal_id}  |  {str(signal.get('timeframe', '15m')).upper()}\n\n"
+        f"Signal #{signal_id}  |  {str(signal.get('timeframe', '15m')).upper()}\n"
+        f"Higher-timeframe confirmation: {', '.join(f'{tf.upper()} {direction}' for tf, direction in (signal.get('higher_timeframe_confirmations') or {}).items()) or 'Unavailable'}\n\n"
         f"Entry: {signal.get('entry', 'N/A')}\n"
         f"Current price: {current_price}\n"
         + (
