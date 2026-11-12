@@ -28,28 +28,74 @@ class MarketScopeTests(unittest.TestCase):
 
 
 class ApiBudgetProtectionTests(unittest.TestCase):
+    def _fresh_state(self):
+        return state._empty_state()
+
     def test_background_jobs_stop_at_reserved_manual_allowance(self):
-        fresh_state = state._empty_state()
-        fresh_state["api_requests"] = (
+        fresh = self._fresh_state()
+        fresh["api_requests"] = (
             config.TWELVE_DATA_DAILY_CREDIT_LIMIT - config.API_RESERVE_REQUESTS
         )
-        with patch.object(state, "_state", fresh_state):
+        with patch.object(state, "_state", fresh):
             for purpose in ("auto", "monitor", "gold_monitor"):
                 allowed, reason = state.reserve_api_request(purpose)
                 self.assertFalse(allowed, purpose)
                 self.assertIn("reserved daily API allowance", reason)
 
+    def test_gold_background_pool_is_capped_at_half(self):
+        fresh = self._fresh_state()
+        fresh["api_requests"] = 350
+        fresh["api_gold_monitor_requests"] = 350
+        fresh["last_request_epoch"] = 0.0
+        with patch.object(state, "_state", fresh):
+            allowed, reason = state.reserve_api_request("gold_monitor")
+        self.assertFalse(allowed)
+        self.assertIn("Gold monitoring reached", reason)
+
+    def test_other_background_pool_is_capped_at_half(self):
+        fresh = self._fresh_state()
+        fresh["api_requests"] = 350
+        fresh["api_other_background_requests"] = 350
+        fresh["last_request_epoch"] = 0.0
+        with patch.object(state, "_state", fresh):
+            allowed, reason = state.reserve_api_request("auto")
+        self.assertFalse(allowed)
+        self.assertIn("Other background monitoring reached", reason)
+
+    def test_gold_request_increments_only_gold_pool(self):
+        fresh = self._fresh_state()
+        fresh["last_request_epoch"] = 0.0
+        with patch.object(state, "_state", fresh), patch.object(state, "_save"):
+            allowed, _ = state.reserve_api_request("gold_monitor")
+        self.assertTrue(allowed)
+        self.assertEqual(fresh["api_requests"], 1)
+        self.assertEqual(fresh["api_gold_monitor_requests"], 1)
+        self.assertEqual(fresh["api_other_background_requests"], 0)
+
     def test_manual_analysis_can_use_reserved_allowance(self):
-        fresh_state = state._empty_state()
-        fresh_state["api_requests"] = (
+        fresh = self._fresh_state()
+        fresh["api_requests"] = (
             config.TWELVE_DATA_DAILY_CREDIT_LIMIT - config.API_RESERVE_REQUESTS
         )
-        fresh_state["last_request_epoch"] = 0.0
-        with patch.object(state, "_state", fresh_state), patch.object(
-            state, "_save"
-        ):
+        fresh["last_request_epoch"] = 0.0
+        with patch.object(state, "_state", fresh), patch.object(state, "_save"):
             allowed, _ = state.reserve_api_request("manual")
         self.assertTrue(allowed)
+
+    def test_old_user_preferences_drop_retired_pairs(self):
+        fresh = self._fresh_state()
+        fresh["users"]["123"] = {
+            "markets": [
+                "XAU/USD", "EUR/USD", "AUD/USD", "USD/CAD",
+                "USD/CHF", "BTC/USD",
+            ]
+        }
+        with patch.object(state, "_state", fresh), patch.object(state, "_save"):
+            user = state.ensure_user("123")
+        self.assertEqual(
+            user["markets"],
+            ["XAU/USD", "EUR/USD", "BTC/USD"],
+        )
 
 
 if __name__ == "__main__":
