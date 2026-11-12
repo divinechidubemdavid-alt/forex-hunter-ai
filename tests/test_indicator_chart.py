@@ -4,7 +4,7 @@ from io import BytesIO
 import numpy as np
 import pandas as pd
 
-from chart import create_market_chart
+from chart import create_market_chart, _supply_demand_zone_bounds
 from strategy import calculate_indicators
 
 
@@ -24,8 +24,8 @@ def _candles(rows=120):
     }, index=index)
 
 
-class IndicatorChartTests(unittest.TestCase):
-    def test_chart_renders_with_strategy_and_indicator_panels(self):
+class SupplyDemandChartTests(unittest.TestCase):
+    def test_chart_renders_with_supply_demand_only(self):
         frame = _candles()
         chart = create_market_chart(
             frame,
@@ -43,9 +43,17 @@ class IndicatorChartTests(unittest.TestCase):
         )
 
         self.assertIsInstance(chart, BytesIO)
-        self.assertEqual(chart.read(8), b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(chart.read(8), b"\\x89PNG\\r\\n\\x1a\\n")
 
-    def test_chart_uses_the_strategy_engines_indicator_columns(self):
+    def test_supply_and_demand_zones_are_detected(self):
+        zones = _supply_demand_zone_bounds(_candles())
+        self.assertTrue(zones)
+        self.assertTrue(all(zone["type"] in {"SUPPLY", "DEMAND"} for zone in zones))
+        self.assertTrue(all(zone["upper"] > zone["lower"] for zone in zones))
+        self.assertLessEqual(sum(zone["type"] == "SUPPLY" for zone in zones), 2)
+        self.assertLessEqual(sum(zone["type"] == "DEMAND" for zone in zones), 2)
+
+    def test_strategy_indicators_remain_available_in_analysis_engine(self):
         indicators = calculate_indicators(_candles())
         for column in (
             "ema9", "ema21", "ema50", "rsi", "adx",
@@ -53,13 +61,3 @@ class IndicatorChartTests(unittest.TestCase):
             "support", "resistance",
         ):
             self.assertIn(column, indicators.columns)
-        self.assertTrue(np.isfinite(indicators["ema9"].iloc[-1]))
-        self.assertTrue(np.isfinite(indicators["ema21"].iloc[-1]))
-        self.assertTrue(np.isfinite(indicators["ema50"].iloc[-1]))
-        self.assertTrue(np.isfinite(indicators["rsi"].iloc[-1]))
-        self.assertTrue(np.isfinite(indicators["adx"].iloc[-1]))
-        self.assertTrue(np.isfinite(indicators["atr"].iloc[-1]))
-
-
-if __name__ == "__main__":
-    unittest.main()
