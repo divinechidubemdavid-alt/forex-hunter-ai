@@ -174,6 +174,12 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(report["actual"], "3.4")
         self.assertEqual(ee.get_event(item["id"])["post_event_report"], report)
 
+    def test_post_release_reaction_windows_cover_immediate_to_24_hours(self):
+        self.assertEqual(
+            ee.POST_RELEASE_CHECKPOINTS,
+            (1, 5, 15, 30, 60, 120, 240, 1440),
+        )
+
     def test_only_high_impact_terms_are_imported(self):
         self.assertTrue(ee.is_high_impact("US Consumer Price Index"))
         self.assertFalse(ee.is_high_impact("Minor regional business survey"))
