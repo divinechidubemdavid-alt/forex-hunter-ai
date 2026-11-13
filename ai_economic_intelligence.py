@@ -320,7 +320,8 @@ def install() -> None:
             old_evidence = baseline.get("event_evidence") or {}
             new_evidence = ee._event_evidence(event)
             event_changes = ee._material_event_change(old_evidence, new_evidence)
-            baseline_technical = baseline.get("technical_snapshot") or {}
+            baseline_market_snapshots = baseline.get("market_technical_snapshots") or {}
+            baseline_technical = baseline_market_snapshots.get(market) or baseline.get("technical_snapshot") or {}
             technical_changes = []
             if baseline_technical.get("status") == "AVAILABLE" and snapshot.get("status") == "AVAILABLE":
                 _, technical_changes = research.material_change(baseline_technical, snapshot)
@@ -335,10 +336,11 @@ def install() -> None:
         snapshot["_ai_checkpoint"] = checkpoint
         return snapshot
 
-    def checkpoint_with_ai(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None):
+    def checkpoint_with_ai(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None, market_technical_snapshots=None):
         record = original_checkpoint(
             event_id, checkpoint, technical=technical, evidence_note=evidence_note,
             technical_snapshot=technical_snapshot, event_evidence=event_evidence,
+            market_technical_snapshots=market_technical_snapshots,
         )
         ai_result = (technical_snapshot or {}).get("ai_interpretation")
         if checkpoint == "5m" and record.get("verification") in {
