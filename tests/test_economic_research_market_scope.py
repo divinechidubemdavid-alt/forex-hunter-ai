@@ -16,6 +16,23 @@ class EconomicResearchMarketScopeTests(unittest.TestCase):
         self.assertEqual(research._market_for_currency("JPY"), "USD/JPY")
         self.assertEqual(research._market_for_currency("XAU"), "XAU/USD")
 
+    def test_gold_event_snapshot_uses_shared_pool_not_dedicated_gold_monitor_pool(self):
+        frame = pd.DataFrame({
+            "close": [100.0] * 45, "high": [101.0] * 45, "low": [99.0] * 45,
+            "ema9": [101.0] * 45, "ema21": [100.0] * 45,
+            "plus_di": [25.0] * 45, "minus_di": [10.0] * 45,
+            "adx": [25.0] * 45, "rsi": [55.0] * 45, "atr": [1.0] * 45,
+        }, index=pd.date_range("2026-11-01", periods=45, freq="min", tz="UTC"))
+        fetch = AsyncMock(return_value=frame)
+        with patch.object(research.market_data, "fetch_candles", fetch), patch.object(
+            research, "calculate_indicators", return_value=frame
+        ):
+            result = asyncio.run(research.technical_snapshot(
+                {"currency": "USD"}, "15m", market="XAU/USD"
+            ))
+        self.assertEqual(result["status"], "AVAILABLE")
+        self.assertEqual(fetch.await_args.kwargs["purpose"], "auto")
+
     def test_official_bls_actual_is_preferred_before_optional_paid_provider(self):
         import trading_economics
         official = {"value": "250", "source": "U.S. Bureau of Labor Statistics"}
