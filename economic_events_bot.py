@@ -422,7 +422,9 @@ async def handle_event_callback(update, context):
             + ("\n\n10Y YIELDS:\n" + yields_text if yields_text else "")
             + ("\n\nPost-release report: available." if report else "\n\nPost-release report: awaiting official actual data.")
         )
-        latest_checkpoint = checkpoints.get("5m") or checkpoints.get("15m") or {}
+        latest_checkpoint = checkpoints.get("5m") or {}
+        if not latest_checkpoint.get("market_technical_snapshots") and not latest_checkpoint.get("market_trade_plans"):
+            latest_checkpoint = checkpoints.get("15m") or latest_checkpoint
         saved_market_snapshots = latest_checkpoint.get("market_technical_snapshots") or {}
         if saved_market_snapshots:
             caption += "\n\nINDEPENDENT MARKET TECHNICAL HISTORY:\n" + "\n".join(
