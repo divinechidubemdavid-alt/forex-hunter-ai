@@ -14,12 +14,21 @@ def event_conversation(event: dict) -> list[dict]:
             continue
         if item.get("checkpoint"):
             analysis = item.get("analysis") or {}
+            market_snapshots = item.get("market_technical_snapshots") or {}
+            market_summary = "; ".join(
+                f'{market} {snapshot.get("direction", "UNAVAILABLE")} '
+                f'(ADX {snapshot.get("adx", "N/A")})'
+                for market, snapshot in market_snapshots.items()
+            )
+            summary = item.get("evidence_note") or "; ".join(analysis.get("reasons", [])[:3])
+            if market_summary:
+                summary = (summary + " | " if summary else "") + "Per-market: " + market_summary
             rows.append({
                 "at": item.get("created_at"),
                 "stage": str(item.get("checkpoint")).upper(),
                 "direction": analysis.get("combined_direction", analysis.get("direction", "UNSCORED")),
                 "confidence": analysis.get("confidence"),
-                "summary": item.get("evidence_note") or "; ".join(analysis.get("reasons", [])[:3]),
+                "summary": summary,
                 "verification": item.get("verification"),
             })
         elif item.get("post_event_report"):
@@ -31,6 +40,8 @@ def event_conversation(event: dict) -> list[dict]:
                 "direction": analysis.get("combined_direction", analysis.get("direction", "UNSCORED")),
                 "confidence": analysis.get("confidence"),
                 "summary": report.get("notes") or "Published actual release recorded.",
+                "market_reactions": report.get("market_reactions", []),
+                "market_reaction_coverage": report.get("market_reaction_coverage", []),
             })
     return sorted(rows, key=lambda row: str(row.get("at") or ""))
 
@@ -128,6 +139,8 @@ def performance_summary(events: list[dict]) -> dict:
         "sell_scored": 0, "sell_correct": 0, "sell_wins": 0, "sell_losses": 0,
         "confidence_total": 0, "confidence_count": 0, "net_r": 0.0, "unscored": 0,
         "by_event_type": {},
+        "by_market": {},
+        "by_horizon": {},
     }
     for event in events:
         final = event.get("final_15m") or event.get("checkpoints", {}).get("15m") or {}
@@ -158,11 +171,73 @@ def performance_summary(events: list[dict]) -> dict:
         bucket["events"] += 1
 
         report = event.get("post_event_report") or {}
-        reactions = [item for item in report.get("market_reactions", [])
-                     if item.get("direction") in {"BULLISH", "BEARISH"}]
+        reactions = [
+            item for item in report.get("market_reactions", [])
+            if item.get("direction") in {"BULLISH", "BEARISH"}
+        ]
+        market_biases = analysis.get("market_biases") or report.get("analysis", {}).get("market_biases") or {}
+        reactions_by_market = {}
+        for reaction in reactions:
+            market = reaction.get("market")
+            pair_direction = reaction.get("pair_direction")
+            expected_bias = market_biases.get(market)
+            if market and expected_bias in {"BUY", "SELL"} and pair_direction in {"BULLISH", "BEARISH"}:
+                expected_pair_direction = "BULLISH" if expected_bias == "BUY" else "BEARISH"
+                market_row = summary["by_market"].setdefault(market, {
+                    "events": 0, "observations": 0, "scored": 0, "correct": 0,
+                    "reversals": 0, "final_24h_scored": 0, "final_24h_correct": 0,
+                })
+                market_row["observations"] += 1
+                market_row["scored"] += 1
+                if pair_direction == expected_pair_direction:
+                    market_row["correct"] += 1
+                horizon = f'{int(reaction.get("minutes_after", 0))}m'
+                horizon_row = summary["by_horizon"].setdefault(horizon, {
+                    "observations": 0, "scored": 0, "correct": 0,
+                })
+                horizon_row["observations"] += 1
+                horizon_row["scored"] += 1
+                if pair_direction == expected_pair_direction:
+                    horizon_row["correct"] += 1
+                reactions_by_market.setdefault(market, []).append(reaction)
+
+        # Score one final event-currency direction from the latest available
+        # observation for each affected market, not the last arbitrary pair
+        # in the stored list.
+        latest_currency_directions = []
+        for market, market_reactions in reactions_by_market.items():
+            ordered = sorted(market_reactions, key=lambda item: int(item.get("minutes_after", 0)))
+            summary["by_market"][market]["events"] += 1
+            first_direction = ordered[0].get("pair_direction")
+            final_direction = ordered[-1].get("pair_direction")
+            if first_direction in {"BULLISH", "BEARISH"} and final_direction in {"BULLISH", "BEARISH"}:
+                if first_direction != final_direction:
+                    summary["by_market"][market]["reversals"] += 1
+            latest = max(market_reactions, key=lambda item: int(item.get("minutes_after", 0)))
+            latest_currency_directions.append(latest.get("direction"))
+            if int(latest.get("minutes_after", 0)) >= 1440:
+                expected_bias = market_biases.get(market)
+                if expected_bias in {"BUY", "SELL"} and latest.get("pair_direction") in {"BULLISH", "BEARISH"}:
+                    summary["by_market"][market]["final_24h_scored"] += 1
+                    expected_pair_direction = "BULLISH" if expected_bias == "BUY" else "BEARISH"
+                    if latest.get("pair_direction") == expected_pair_direction:
+                        summary["by_market"][market]["final_24h_correct"] += 1
+
         correct = None
-        if direction in {"BULLISH", "BEARISH"} and reactions:
+        if direction in {"BULLISH", "BEARISH"} and latest_currency_directions:
+            bullish = latest_currency_directions.count("BULLISH")
+            bearish = latest_currency_directions.count("BEARISH")
+            final_currency_direction = (
+                "BULLISH" if bullish > bearish else
+                "BEARISH" if bearish > bullish else None
+            )
+            if final_currency_direction:
+                correct = final_currency_direction == direction
+        elif direction in {"BULLISH", "BEARISH"} and reactions:
+            # Backward compatibility for older event records without market IDs.
             correct = reactions[-1]["direction"] == direction
+
+        if correct is not None:
             summary["directional_scored"] += 1
             bucket["directional_scored"] += 1
             if correct:
@@ -233,5 +308,19 @@ def performance_summary(events: list[dict]) -> dict:
     sell_trades = summary["sell_wins"] + summary["sell_losses"]
     summary["buy_trade_win_rate_pct"] = round(100 * summary["buy_wins"] / buy_trades, 1) if buy_trades else None
     summary["sell_trade_win_rate_pct"] = round(100 * summary["sell_wins"] / sell_trades, 1) if sell_trades else None
+    for market_row in summary["by_market"].values():
+        market_row["accuracy_pct"] = (
+            round(100 * market_row["correct"] / market_row["scored"], 1)
+            if market_row["scored"] else None
+        )
+        market_row["final_24h_accuracy_pct"] = (
+            round(100 * market_row["final_24h_correct"] / market_row["final_24h_scored"], 1)
+            if market_row["final_24h_scored"] else None
+        )
+    for horizon_row in summary["by_horizon"].values():
+        horizon_row["accuracy_pct"] = (
+            round(100 * horizon_row["correct"] / horizon_row["scored"], 1)
+            if horizon_row["scored"] else None
+        )
     summary["net_r"] = round(summary["net_r"], 2)
     return summary
