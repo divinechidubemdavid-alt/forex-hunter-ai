@@ -15,6 +15,7 @@ import economic_event_visuals as event_visuals
 import economic_research as research
 import trading_economics as te
 import state
+from config import MARKETS
 
 log = logging.getLogger(__name__)
 WAT = ZoneInfo("Africa/Lagos")
