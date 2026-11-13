@@ -172,13 +172,13 @@ async def fetch_candles(
             raise MarketDataError(reason)
 
         params = {
-        "symbol": symbol,
-        "interval": provider_interval,
-        "outputsize": outputsize,
-        "apikey": TWELVE_DATA_API_KEY,
-        "format": "JSON",
-        "timezone": "UTC",
-    }
+            "symbol": symbol,
+            "interval": provider_interval,
+            "outputsize": outputsize,
+            "apikey": TWELVE_DATA_API_KEY,
+            "format": "JSON",
+            "timezone": "UTC",
+        }
 
         try:
             async with httpx.AsyncClient(timeout=25) as client:
