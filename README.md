@@ -59,7 +59,7 @@ The active platform universe is XAU/USD, GBP/USD, USD/JPY and BTC/USD. Existing 
 
 ## Existing safety controls
 
-- Twelve Data local ceiling: 800 requests per Nigeria calendar day.
+- Twelve Data local ceiling: 800 requests per UTC day (the provider's daily reset boundary).
 - Twelve Data requests share one cache and per-symbol/timeframe request coalescing; the eight-second cooldown is respected across event, scanner, Gold and tracked-signal work.
 - The 700-request background allowance is split into a protected 350-request Gold-monitor pool and a 350-request other-background pool. The separate 100-request reserve remains available for manual analysis.
 - No provider API key or data-distribution licence is assumed to exist.
