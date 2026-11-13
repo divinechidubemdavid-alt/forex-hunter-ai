@@ -456,10 +456,11 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
                     _, technical_changes = material_change(baseline_technical, current_technical)
             changes = event_changes + technical_changes
             record["material_changes"] = changes
+            record["technical_coverage_complete"] = technical_available
             provider_status = current_event_evidence.get("provider_context_status", "NOT_CONFIGURED")
             if (
                 (not technical_available or provider_status == "UNAVAILABLE")
-                and not event_changes
+                and not changes
             ):
                 record["analysis"] = baseline["analysis"]
                 record["verification"] = "UNAVAILABLE"
@@ -472,6 +473,10 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
                 )
             else:
                 record["analysis"] = directional_analysis(event, technical=technical, phase=phase)
+                if not technical_available:
+                    record["analysis"]["reasons"].append(
+                        "Per-market technical coverage was incomplete; available market changes were reviewed without claiming full-market confirmation."
+                    )
                 old_direction = baseline["analysis"].get(
                     "combined_direction", baseline["analysis"].get("direction")
                 )
