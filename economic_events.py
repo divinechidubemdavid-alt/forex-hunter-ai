@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 import state
-from config import WEEKDAY_MARKETS
+from config import MARKETS
 
 WAT = ZoneInfo("Africa/Lagos")
 
@@ -216,12 +216,13 @@ def directional_analysis(event, technical=None, phase="pre-event"):
         direction = fundamental_direction
     combined_direction = direction
     pairs = {
-        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"],
-        "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
+        "USD": ["XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD"],
+        "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
+        "XAU": ["XAU/USD"],
     }.get(currency, [])
-    # Economic-event directional outputs follow the weekday trading universe.
-    # BTC/USD is reserved for weekend trading and retired pairs are excluded.
-    pairs = [pair for pair in pairs if pair in WEEKDAY_MARKETS]
+    # Event analysis is limited to the four active platform markets.
+    # BTC/USD is included for USD-sensitive releases; retired pairs are excluded.
+    pairs = [pair for pair in pairs if pair in MARKETS]
     market_biases = {}
     for pair in pairs:
         base, quote = pair.split("/")
