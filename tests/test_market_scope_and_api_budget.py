@@ -13,11 +13,11 @@ class MarketScopeTests(unittest.TestCase):
     def test_only_requested_markets_are_configured(self):
         self.assertEqual(
             set(config.MARKETS),
-            {"XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY", "BTC/USD"},
+            {"XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD"},
         )
 
     def test_weekdays_include_gold_and_three_forex_pairs_only(self):
-        expected = ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY"]
+        expected = ["XAU/USD", "GBP/USD", "USD/JPY"]
         self.assertEqual(get_session_markets(config.MARKETS, 0), expected)
         self.assertNotIn("BTC/USD", get_session_markets(config.MARKETS, 0))
 
@@ -33,7 +33,7 @@ class MarketScopeTests(unittest.TestCase):
         now = datetime(2026, 11, 9, 12, 0, tzinfo=ZoneInfo("Africa/Lagos"))
         self.assertEqual(
             _eligible_markets(now),
-            ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY"],
+            ["XAU/USD", "GBP/USD", "USD/JPY"],
         )
 
     def test_automatic_scanner_is_bitcoin_only_on_weekends(self):
@@ -108,7 +108,7 @@ class ApiBudgetProtectionTests(unittest.TestCase):
             user = state.ensure_user("123")
         self.assertEqual(
             user["markets"],
-            ["XAU/USD", "EUR/USD", "BTC/USD"],
+            ["XAU/USD", "BTC/USD"],
         )
 
     def test_utc_day_rollover_resets_all_api_pools(self):
