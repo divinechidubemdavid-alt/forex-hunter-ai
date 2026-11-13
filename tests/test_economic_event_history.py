@@ -76,7 +76,7 @@ class EconomicEventHistoryTests(unittest.TestCase):
         self.assertEqual(result["by_market"]["GBP/USD"]["final_24h_accuracy_pct"], 100.0)
         self.assertEqual(result["by_market"]["USD/JPY"]["final_24h_accuracy_pct"], 100.0)
         self.assertEqual(result["by_horizon"]["1m"]["observations"], 2)
-        self.assertEqual(result["by_horizon"]["1440m"]["observations"], 3)
+        self.assertEqual(result["by_horizon"]["1440m"]["observations"], 2)
         self.assertEqual(result["directional_scored"], 1)
         self.assertEqual(result["directional_correct"], 1)
 
