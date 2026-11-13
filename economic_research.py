@@ -277,7 +277,7 @@ async def technical_snapshot(event: dict, checkpoint: str, market: str | None = 
                     market,
                     outputsize=180,
                     interval=timeframe,
-                    purpose="gold_monitor" if market == "XAU/USD" else "auto",
+                    purpose="auto",
                 )
                 break
             except market_data.MarketDataError as exc:
