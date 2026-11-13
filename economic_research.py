@@ -374,14 +374,17 @@ def material_change(baseline: dict, current: dict) -> tuple[bool, list[str]]:
     return bool(changes), changes
 
 async def auto_actual_release(event: dict) -> dict | None:
-    """Prefer licensed global calendar actuals; fall back to official BLS API."""
+    """Prefer a matching free official BLS actual; use licensed data only as fallback."""
+    try:
+        official = await fetch_bls_release_actual(event)
+        if official:
+            return official
+    except Exception:
+        log.exception("Official BLS actual lookup failed; checking optional provider fallback")
     try:
         import trading_economics
         if trading_economics.configured() and event.get("provider_calendar_id"):
-            result = await trading_economics.fetch_event_actual(event)
-            if result:
-                return result
+            return await trading_economics.fetch_event_actual(event)
     except Exception:
-        # Do not silently invent or replace an official value; try the supported BLS source.
-        log.exception("Trading Economics actual lookup failed; trying BLS fallback")
-    return await fetch_bls_release_actual(event)
+        log.exception("Optional Trading Economics actual lookup failed")
+    return None
