@@ -27,11 +27,13 @@ class AIEconomicIntelligenceTests(unittest.TestCase):
         self.assertEqual(combined["fundamental_direction"], "BULLISH")
         self.assertEqual(combined["combined_direction"], "BULLISH")
         self.assertLess(combined["confidence"], 70)
-        self.assertEqual(combined["market_biases"]["EUR/USD"], "SELL")
+        self.assertEqual(combined["market_biases"]["XAU/USD"], "SELL")
+        self.assertEqual(combined["market_biases"]["GBP/USD"], "SELL")
         self.assertEqual(combined["market_biases"]["USD/JPY"], "BUY")
+        self.assertEqual(combined["market_biases"]["BTC/USD"], "SELL")
         self.assertEqual(
             set(combined["market_biases"]),
-            {"EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"},
+            {"XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD"},
         )
 
     def test_inconclusive_evidence_does_not_create_a_fundamental_trade_direction(self):
