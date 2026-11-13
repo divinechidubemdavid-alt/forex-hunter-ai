@@ -61,5 +61,5 @@ The active platform universe is XAU/USD, GBP/USD, USD/JPY and BTC/USD. Existing 
 
 - Twelve Data local ceiling: 800 requests per UTC day (the provider's daily reset boundary).
 - Twelve Data requests share one cache and per-symbol/timeframe request coalescing; the eight-second cooldown is respected across event, scanner, Gold and tracked-signal work.
-- The 700-request background allowance is split into a protected 350-request Gold-monitor pool and a 350-request other-background pool. The separate 100-request reserve remains available for manual analysis.
+- The 700-request background allowance is split into a protected 350-request dedicated Gold-monitor pool and a 350-request other-background pool. Only the dedicated multi-timeframe Gold monitor uses the Gold pool; Gold scanner, event and tracked-signal checks use the other pool. The separate 100-request reserve remains available for manual analysis.
 - No provider API key or data-distribution licence is assumed to exist.
