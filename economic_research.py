@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -269,12 +270,23 @@ async def technical_snapshot(event: dict, checkpoint: str, market: str | None = 
     else:
         timeframe = "5m" if checkpoint in {"15m", "5m"} else "15m"
     try:
-        frame = await market_data.fetch_candles(
-            market,
-            outputsize=180,
-            interval=timeframe,
-            purpose="gold_monitor" if market == "XAU/USD" else "auto",
-        )
+        frame = None
+        for attempt in range(4):
+            try:
+                frame = await market_data.fetch_candles(
+                    market,
+                    outputsize=180,
+                    interval=timeframe,
+                    purpose="gold_monitor" if market == "XAU/USD" else "auto",
+                )
+                break
+            except market_data.MarketDataError as exc:
+                cooldown = re.search(r"Try again in ([0-9.]+) seconds", str(exc))
+                if not cooldown or attempt == 3:
+                    raise
+                # Respect the shared eight-second provider throttle instead of
+                # silently dropping the remaining affected markets in this checkpoint.
+                await asyncio.sleep(float(cooldown.group(1)) + 0.25)
         data = calculate_indicators(frame).dropna()
         if len(data) < 40:
             return {"status": "UNAVAILABLE", "reason": "Insufficient completed candles.", "market": market}
