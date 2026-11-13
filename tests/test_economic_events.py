@@ -229,6 +229,35 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(verified["verification"], "UNAVAILABLE")
         self.assertEqual(verified["analysis"], first["analysis"])
 
+    def test_5m_reviews_confirmed_change_even_if_another_market_is_unavailable(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        baseline = {
+            market: {
+                "status": "AVAILABLE", "market": market,
+                "direction": "BULLISH", "currency_direction": "BULLISH",
+                "adx": 25, "breakout": "NONE", "volatility_pct": 0.2,
+            }
+            for market in ("XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD")
+        }
+        ee.record_checkpoint(
+            item["id"], "15m", technical="BULLISH",
+            technical_snapshot=baseline["XAU/USD"], market_technical_snapshots=baseline,
+        )
+        current = {key: dict(value) for key, value in baseline.items()}
+        current["XAU/USD"].update({
+            "direction": "BEARISH", "adx": 35,
+            "breakout": "DOWNSIDE_BREAKOUT", "volatility_pct": 0.5,
+        })
+        current["BTC/USD"] = {"status": "UNAVAILABLE", "market": "BTC/USD", "reason": "API cooldown"}
+        reviewed = ee.record_checkpoint(
+            item["id"], "5m", technical="BULLISH",
+            technical_snapshot=current["XAU/USD"], market_technical_snapshots=current,
+        )
+        self.assertEqual(reviewed["verification"], "REVIEWED_MATERIAL_CHANGE")
+        self.assertFalse(reviewed["technical_coverage_complete"])
+        self.assertTrue(any("XAU/USD:" in change for change in reviewed["material_changes"]))
+        self.assertTrue(any("coverage was incomplete" in reason for reason in reviewed["analysis"]["reasons"]))
+
     def test_5m_records_market_specific_material_reversal(self):
         item = self.event(forecast="3.1", previous="3.2")
         baseline = {
