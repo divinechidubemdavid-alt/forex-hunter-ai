@@ -562,7 +562,16 @@ def record_market_reaction_coverage(event_id, minutes_after, expected_markets, a
         "unavailable_markets": dict(unavailable_markets or {}),
     }
     report = event["post_event_report"]
-    report.setdefault("market_reaction_coverage", []).append(coverage)
+    coverage_rows = report.setdefault("market_reaction_coverage", [])
+    coverage_index = next(
+        (index for index, item in enumerate(coverage_rows)
+         if item.get("minutes_after") == int(minutes_after)),
+        None,
+    )
+    if coverage_index is None:
+        coverage_rows.append(coverage)
+    else:
+        coverage_rows[coverage_index] = coverage
     event.setdefault("history", []).append({"market_reaction_coverage": coverage})
     event["post_event_report"] = report
     save_event(event)
@@ -586,7 +595,19 @@ def record_market_reaction(event_id, snapshot, minutes_after):
         "breakout": snapshot.get("breakout"),
         "source": snapshot.get("source", "unavailable"),
     }
-    report.setdefault("market_reactions", []).append(reaction)
+    reactions = report.setdefault("market_reactions", [])
+    existing_index = next(
+        (
+            index for index, item in enumerate(reactions)
+            if item.get("minutes_after") == int(minutes_after)
+            and item.get("market") == reaction.get("market")
+        ),
+        None,
+    )
+    if existing_index is None:
+        reactions.append(reaction)
+    else:
+        reactions[existing_index] = reaction
     expected = report.get("analysis", {}).get(
         "combined_direction", report.get("analysis", {}).get("direction")
     )
