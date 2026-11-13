@@ -43,6 +43,9 @@ def _ics_timezone(zone_name):
 
 CHECKPOINTS = (("24h", timedelta(hours=24)), ("1h", timedelta(hours=1)),
                ("15m", timedelta(minutes=15)), ("5m", timedelta(minutes=5)))
+# Preserve the immediate reaction and evaluate whether the move reverses,
+# continues, or remains sustained through the full 24-hour window.
+POST_RELEASE_CHECKPOINTS = (1, 5, 15, 30, 60, 120, 240, 1440)
 HIGH_IMPACT_TERMS = (
     "nonfarm", "payroll", "employment situation", "job openings",
     "producer price index", "cpi", "consumer price", "fomc", "federal funds",
