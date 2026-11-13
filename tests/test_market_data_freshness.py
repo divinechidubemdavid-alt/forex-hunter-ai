@@ -64,6 +64,8 @@ class MarketDataRequestCoalescingTests(unittest.TestCase):
         self.assertEqual(calls["provider"], 1)
         self.assertEqual(calls["reserved"], 1)
         self.assertEqual(len(frames[0]), len(frames[1]))
+        market_data._cache.clear()
+        market_data._inflight_locks.clear()
 
 
 class HigherTimeframeFreshnessTests(unittest.TestCase):
