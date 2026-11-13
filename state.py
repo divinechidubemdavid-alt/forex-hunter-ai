@@ -156,9 +156,9 @@ def reserve_api_request(purpose='manual'):
         purpose = str(purpose).strip().lower()
 
         # Split the 700-request background pool into a protected 50/50
-        # allocation: Gold multi-timeframe monitoring and all other
-        # background work (automatic scanner + tracked-signal monitoring).
-        # The final 100 slots remain available for manual requests.
+        # allocation: only the dedicated Gold multi-timeframe monitor uses
+        # the Gold pool; scanners, event checks and tracked-signal monitoring
+        # use the other pool. The final 100 slots remain for manual requests.
         background_purposes = {"auto", "monitor", "gold_monitor"}
         background_limit = max(0, limit - int(API_RESERVE_REQUESTS))
         if purpose in background_purposes:
