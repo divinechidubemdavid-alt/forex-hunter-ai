@@ -10,19 +10,18 @@ from market_scope import (
 
 MARKETS = {
     "XAU/USD": "XAU/USD",
-    "EUR/USD": "EUR/USD",
     "GBP/USD": "GBP/USD",
     "USD/JPY": "USD/JPY",
     "BTC/USD": "BTC/USD",
 }
 
 WEEKDAY_EXPECTED = [
-    "XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY",
+    "XAU/USD", "GBP/USD", "USD/JPY",
 ]
 
 
 class MarketSessionScopeTests(unittest.TestCase):
-    def test_weekdays_include_gold_and_three_retained_forex_pairs(self):
+    def test_weekdays_include_gold_and_two_retained_forex_pairs(self):
         for weekday in range(5):
             with self.subTest(weekday=weekday):
                 self.assertEqual(get_session_markets(MARKETS, weekday), WEEKDAY_EXPECTED)
