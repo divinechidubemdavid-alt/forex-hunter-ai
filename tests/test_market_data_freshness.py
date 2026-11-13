@@ -56,9 +56,9 @@ class MarketDataRequestCoalescingTests(unittest.TestCase):
                 market_data.fetch_candles("GBP/USD", 60, "1m", "monitor"),
             )
 
-        with patch.object(market_data.httpx, "AsyncClient", Client), patch.object(
-            market_data.state, "reserve_api_request", side_effect=reserve
-        ):
+        with patch.object(market_data, "TWELVE_DATA_API_KEY", "test-key"), patch.object(
+            market_data.httpx, "AsyncClient", Client
+        ), patch.object(market_data.state, "reserve_api_request", side_effect=reserve):
             frames = asyncio.run(run())
 
         self.assertEqual(calls["provider"], 1)
