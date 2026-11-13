@@ -531,8 +531,16 @@ def _tracked_signal_keyboard(signal_id):
     ])
 
 
+async def _active_market_tracked_signals(user_id):
+    """Keep retired-market records in history, not in the active tracking view."""
+    return [
+        signal for signal in state.get_tracked_signals(user_id)
+        if signal.get("symbol") in MARKETS
+    ]
+
+
 async def _send_tracked_signals(chat, user_id):
-    signals = state.get_tracked_signals(user_id)
+    signals = _active_market_tracked_signals(user_id)
 
     if not signals:
         await chat.send_message(
