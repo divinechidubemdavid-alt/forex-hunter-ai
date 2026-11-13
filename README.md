@@ -34,7 +34,7 @@ Technical checks use completed candles and the existing EMA/ADX/RSI/ATR and brea
 
 - The optional Trading Economics API covers global high-impact events, consensus, actuals and news; its use for multi-user Telegram delivery requires a suitable redistribution licence.
 - Without that key, official calendar fallback is currently focused on U.S. BLS, FOMC and BEA events; other currencies can be added as personal events.
-- The technical snapshot uses one representative proxy pair per event currency; affected pair biases are mapped from currency strength rather than independently scanning every pair.
+- Event research is restricted to the four active platform markets: XAU/USD, GBP/USD, USD/JPY and BTC/USD. USD-event bias includes all four; the technical proxy defaults to Gold, with explicit market selection restricted to the active allow-list.
 - No broker connection, order placement or automatic trade execution is implemented.
 
 ## Trading styles
@@ -55,7 +55,7 @@ Scalping signals deliberately contain no Stop Loss or TP1/TP2/TP3 fields. Their 
 
 The **Automatic Scanner** and **Strong Signals** are restricted to **DAY TRADE** only. Every new automatic signal, Strong Signal card, tracked record, monitoring alert and chart carries its trading-style label. Scalping and Swing remain available through manual Analyze Market only.
 
-BTC/USD is eligible on weekdays and weekends. On weekends, BTC/USD is the only market enabled; the other configured markets remain excluded.
+The active platform universe is XAU/USD, GBP/USD, USD/JPY and BTC/USD. Existing session eligibility is preserved: Gold and the two forex pairs are weekday markets; BTC/USD is the weekend market.
 
 ## Existing safety controls
 
