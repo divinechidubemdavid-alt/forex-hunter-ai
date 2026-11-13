@@ -713,13 +713,18 @@ async def economic_events_loop(application):
                 if event.get("status") == "released" and event.get("post_event_report"):
                     elapsed = now - ee._parse_dt(event["scheduled_at"])
                     attempts = event.setdefault("post_release_attempts", [])
-                    for minutes_after in (5, 15, 30):
+                    for minutes_after in ee.POST_RELEASE_CHECKPOINTS:
                         if elapsed >= timedelta(minutes=minutes_after) and minutes_after not in attempts:
                             attempts.append(minutes_after)
                             ee.save_event(event)
                             try:
+                                reaction_checkpoint = (
+                                    "post_1m" if minutes_after == 1 else
+                                    "post_5m" if minutes_after == 5 else
+                                    "post_15m"
+                                )
                                 reaction = await research.technical_snapshot(
-                                    event, "15m" if minutes_after >= 15 else "5m"
+                                    event, reaction_checkpoint
                                 )
                                 reaction.pop("_frame", None)
                                 if reaction.get("status") == "AVAILABLE":
