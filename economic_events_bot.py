@@ -33,11 +33,9 @@ def event_center_keyboard():
 
 
 async def _sync_calendars():
-    if te.configured():
-        try:
-            return len(await te.fetch_calendar_events()), "Trading Economics global calendar"
-        except Exception:
-            log.exception("Licensed global calendar sync failed; using official-source fallback")
+    # Free official sources are always checked first. A licensed provider is
+    # optional enrichment for consensus/news/revisions, never a replacement
+    # for the official BLS, Federal Reserve and BEA calendars.
     total = 0
     successes = 0
     failures = []
@@ -54,11 +52,23 @@ async def _sync_calendars():
         except Exception as exc:
             failures.append(label)
             log.exception("%s calendar sync failed", label)
-    # A successful importer may return zero because there are no new dates to add.
-    # Only report total failure when every official source raised an exception.
+
+    if te.configured():
+        try:
+            imported = await te.fetch_calendar_events()
+            successes += 1
+            total += len(imported)
+            log.info("Licensed calendar enrichment completed; %d new events imported", len(imported))
+        except Exception:
+            failures.append("licensed Trading Economics")
+            log.exception("Licensed global calendar enrichment failed")
+
+    # A successful importer may return zero because there are no new dates.
     if failures and successes == 0:
-        raise RuntimeError("All official calendar imports failed: " + ", ".join(failures))
-    source = "official BLS, Federal Reserve and BEA calendars"
+        raise RuntimeError("All economic calendar sources failed: " + ", ".join(failures))
+    source = "free official BLS, Federal Reserve and BEA calendars"
+    if te.configured() and "licensed Trading Economics" not in failures:
+        source += " plus optional licensed consensus/news enrichment"
     if failures:
         source += " (partial; failed: " + ", ".join(failures) + ")"
     return total, source
