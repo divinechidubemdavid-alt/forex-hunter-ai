@@ -15,6 +15,7 @@ import httpx
 
 import market_data
 import state
+from config import MARKETS
 from strategy import calculate_indicators
 
 log = logging.getLogger(__name__)
@@ -239,20 +240,26 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
     }
 
 def _market_for_currency(currency: str) -> str | None:
+    # Use only a directly relevant active market; USD releases default to Gold.
     return {
-        "USD": "EUR/USD", "EUR": "EUR/USD", "GBP": "GBP/USD",
+        "USD": "XAU/USD", "GBP": "GBP/USD",
         "JPY": "USD/JPY", "XAU": "XAU/USD",
     }.get(str(currency).upper())
 
-async def technical_snapshot(event: dict, checkpoint: str) -> dict:
+
+async def technical_snapshot(event: dict, checkpoint: str, market: str | None = None) -> dict:
     """Run closed-candle EMA/ADX/RSI/ATR and breakout-retest context.
 
     Event checks are charged to the existing local Twelve Data safety ceiling.
     No event-specific request can bypass the shared 800/day counter.
     """
-    market = _market_for_currency(event.get("currency", "USD"))
-    if not market:
-        return {"status": "UNAVAILABLE", "reason": "No configured proxy market for this currency."}
+    market = str(market or _market_for_currency(event.get("currency", "USD")) or "").upper()
+    if market not in MARKETS:
+        return {
+            "status": "UNAVAILABLE",
+            "market": market or None,
+            "reason": "No active market is available for this event currency.",
+        }
     timeframe = "5m" if checkpoint in {"15m", "5m"} else "15m"
     try:
         frame = await market_data.fetch_candles(
