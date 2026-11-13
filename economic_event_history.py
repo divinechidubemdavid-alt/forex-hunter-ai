@@ -34,12 +34,27 @@ def event_conversation(event: dict) -> list[dict]:
         elif item.get("post_event_report"):
             report = item["post_event_report"]
             analysis = report.get("analysis") or {}
+            reaction_summary = "; ".join(
+                f'{item.get("market")} +{item.get("minutes_after")}m '
+                f'currency {item.get("direction")} / pair {item.get("pair_direction", "N/A")}'
+                for item in report.get("market_reactions", [])
+            )
+            coverage_summary = "; ".join(
+                f'+{item.get("minutes_after")}m {len(item.get("available_markets", []))}/'
+                f'{len(item.get("expected_markets", []))} markets covered'
+                for item in report.get("market_reaction_coverage", [])
+            )
+            summary = report.get("notes") or "Published actual release recorded."
+            if reaction_summary:
+                summary += " | Reactions: " + reaction_summary
+            if coverage_summary:
+                summary += " | Coverage: " + coverage_summary
             rows.append({
                 "at": report.get("created_at"),
                 "stage": "POST-RELEASE",
                 "direction": analysis.get("combined_direction", analysis.get("direction", "UNSCORED")),
                 "confidence": analysis.get("confidence"),
-                "summary": report.get("notes") or "Published actual release recorded.",
+                "summary": summary,
                 "market_reactions": report.get("market_reactions", []),
                 "market_reaction_coverage": report.get("market_reaction_coverage", []),
             })
