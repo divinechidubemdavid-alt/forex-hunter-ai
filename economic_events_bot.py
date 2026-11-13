@@ -432,6 +432,12 @@ async def handle_event_callback(update, context):
                 f'ATR {item.get("atr", "N/A")}, breakout {item.get("breakout", "N/A")})'
                 for market, item in saved_market_snapshots.items()
             )
+        saved_market_plans = latest_checkpoint.get("market_trade_plans") or {}
+        if saved_market_plans:
+            caption += "\n\nPER-MARKET TRADE PLAN STATUS:\n" + "\n".join(
+                f'{market}: {plan.get("status", "NO_TRADE")} — {plan.get("reason", "See plan details.")}'
+                for market, plan in saved_market_plans.items()
+            )
         history_plan = latest_checkpoint.get("trade_plan") or {}
         caption += (
             "\n\nTRADE TIMEFRAME: "
