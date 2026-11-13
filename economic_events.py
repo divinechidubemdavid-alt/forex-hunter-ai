@@ -399,7 +399,7 @@ def _material_event_change(previous, current):
     return changes
 
 
-def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None):
+def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None, market_technical_snapshots=None):
     if checkpoint not in dict(CHECKPOINTS):
         raise ValueError("Unsupported event checkpoint.")
     event = get_event(event_id)
@@ -412,6 +412,7 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
         "checkpoint": checkpoint, "created_at": _now().isoformat(),
         "analysis": analysis, "evidence_note": str(evidence_note),
         "technical_snapshot": technical_snapshot or {},
+        "market_technical_snapshots": market_technical_snapshots or {},
         "event_evidence": current_event_evidence,
     }
     if checkpoint == "15m":
@@ -426,16 +427,33 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
                 baseline.get("event_evidence") or {},
                 current_event_evidence,
             )
-            baseline_technical = baseline.get("technical_snapshot") or {}
-            current_technical = technical_snapshot or {}
-            technical_available = (
-                baseline_technical.get("status") == "AVAILABLE"
-                and current_technical.get("status") == "AVAILABLE"
-            )
+            baseline_markets = baseline.get("market_technical_snapshots") or {}
+            current_markets = market_technical_snapshots or {}
             technical_changes = []
-            if technical_available:
+            if baseline_markets:
+                expected_markets = set(baseline_markets)
+                technical_available = bool(expected_markets) and all(
+                    baseline_markets.get(market, {}).get("status") == "AVAILABLE"
+                    and current_markets.get(market, {}).get("status") == "AVAILABLE"
+                    for market in expected_markets
+                )
                 from economic_research import material_change
-                _, technical_changes = material_change(baseline_technical, current_technical)
+                for market in sorted(expected_markets):
+                    old_snapshot = baseline_markets.get(market) or {}
+                    new_snapshot = current_markets.get(market) or {}
+                    if old_snapshot.get("status") == "AVAILABLE" and new_snapshot.get("status") == "AVAILABLE":
+                        _, market_changes = material_change(old_snapshot, new_snapshot)
+                        technical_changes.extend(f"{market}: {change}" for change in market_changes)
+            else:
+                baseline_technical = baseline.get("technical_snapshot") or {}
+                current_technical = technical_snapshot or {}
+                technical_available = (
+                    baseline_technical.get("status") == "AVAILABLE"
+                    and current_technical.get("status") == "AVAILABLE"
+                )
+                if technical_available:
+                    from economic_research import material_change
+                    _, technical_changes = material_change(baseline_technical, current_technical)
             changes = event_changes + technical_changes
             record["material_changes"] = changes
             provider_status = current_event_evidence.get("provider_context_status", "NOT_CONFIGURED")
@@ -511,6 +529,44 @@ def record_actual(event_id, actual, revised_previous=None, notes="", details=Non
     event.setdefault("history", []).append({"post_event_report": report})
     save_event(event)
     return report
+
+
+def aggregate_market_currency_direction(market_snapshots):
+    """Return a market-consensus currency direction, or None when votes conflict."""
+    votes = [
+        snapshot.get("currency_direction")
+        for snapshot in (market_snapshots or {}).values()
+        if isinstance(snapshot, dict)
+        and snapshot.get("status") == "AVAILABLE"
+        and snapshot.get("currency_direction") in {"BULLISH", "BEARISH"}
+    ]
+    bullish = votes.count("BULLISH")
+    bearish = votes.count("BEARISH")
+    if bullish > bearish:
+        return "BULLISH"
+    if bearish > bullish:
+        return "BEARISH"
+    return None
+
+
+def record_market_reaction_coverage(event_id, minutes_after, expected_markets, available_markets, unavailable_markets=None):
+    """Persist transparent per-market coverage for a post-release observation window."""
+    event = get_event(event_id)
+    if not event or not event.get("post_event_report"):
+        raise KeyError("Post-event report not found.")
+    coverage = {
+        "minutes_after": int(minutes_after),
+        "observed_at": _now().isoformat(),
+        "expected_markets": list(expected_markets or []),
+        "available_markets": list(available_markets or []),
+        "unavailable_markets": dict(unavailable_markets or {}),
+    }
+    report = event["post_event_report"]
+    report.setdefault("market_reaction_coverage", []).append(coverage)
+    event.setdefault("history", []).append({"market_reaction_coverage": coverage})
+    event["post_event_report"] = report
+    save_event(event)
+    return coverage
 
 
 def record_market_reaction(event_id, snapshot, minutes_after):
