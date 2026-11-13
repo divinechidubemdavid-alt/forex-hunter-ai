@@ -9,11 +9,10 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "").strip()
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
 
-# Five approved markets. Removed pairs are intentionally unavailable
-# to manual analysis, automatic scanning, Strong Signals, and monitoring.
+# Exactly four active markets across the platform.
+# Retired pairs remain in historical records but are never selectable or scanned.
 MARKETS = {
     "XAU/USD": "XAU/USD",
-    "EUR/USD": "EUR/USD",
     "GBP/USD": "GBP/USD",
     "USD/JPY": "USD/JPY",
     "BTC/USD": "BTC/USD",
@@ -85,11 +84,10 @@ PLACE_BROKER_ORDERS = False
 GOLD_BUDGET_SHARE = 0.50
 
 # Single source of truth for session eligibility.
-# Weekday session: Gold and the three retained forex pairs.
-# BTC/USD is intentionally reserved for weekend trading.
+# Preserve the existing session rule: Gold and forex during weekdays;
+# BTC/USD is the weekend market. All four remain active platform markets.
 WEEKDAY_MARKETS = (
     "XAU/USD",
-    "EUR/USD",
     "GBP/USD",
     "USD/JPY",
 )
@@ -100,7 +98,6 @@ WEEKEND_MARKETS = ("BTC/USD",)
 # Forex pairs are listed separately so the automatic scanner can
 # respect the normal Friday close and Sunday reopening window.
 FOREX_MARKETS = (
-    "EUR/USD",
     "GBP/USD",
     "USD/JPY",
 )
