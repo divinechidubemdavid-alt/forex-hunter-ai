@@ -16,6 +16,30 @@ class EconomicResearchMarketScopeTests(unittest.TestCase):
         self.assertEqual(research._market_for_currency("JPY"), "USD/JPY")
         self.assertEqual(research._market_for_currency("XAU"), "XAU/USD")
 
+    def test_official_bls_actual_is_preferred_before_optional_paid_provider(self):
+        import trading_economics
+        official = {"value": "250", "source": "U.S. Bureau of Labor Statistics"}
+        paid = AsyncMock(return_value={"value": "251", "source": "Trading Economics"})
+        with patch.object(research, "fetch_bls_release_actual", new=AsyncMock(return_value=official)), patch.object(
+            trading_economics, "configured", return_value=True
+        ), patch.object(trading_economics, "fetch_event_actual", new=paid):
+            result = asyncio.run(research.auto_actual_release({"title": "Nonfarm Payrolls"}))
+        self.assertEqual(result, official)
+        paid.assert_not_awaited()
+
+    def test_optional_paid_actual_is_fallback_when_no_official_value_exists(self):
+        import trading_economics
+        paid_result = {"value": "251", "source": "Trading Economics"}
+        paid = AsyncMock(return_value=paid_result)
+        with patch.object(research, "fetch_bls_release_actual", new=AsyncMock(return_value=None)), patch.object(
+            trading_economics, "configured", return_value=True
+        ), patch.object(trading_economics, "fetch_event_actual", new=paid):
+            result = asyncio.run(research.auto_actual_release({
+                "title": "Nonfarm Payrolls", "provider_calendar_id": "123"
+            }))
+        self.assertEqual(result, paid_result)
+        paid.assert_awaited_once()
+
     def test_market_snapshot_waits_for_shared_api_cooldown_then_retries(self):
         frame = pd.DataFrame({
             "close": [100.0] * 45, "high": [101.0] * 45, "low": [99.0] * 45,
