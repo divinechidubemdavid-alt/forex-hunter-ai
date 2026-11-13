@@ -356,9 +356,16 @@ async def handle_event_callback(update, context):
                 f'Confidence: {analysis["confidence"]}/100\n'
                 f'Forecast score: {report.get("forecast_score", "UNSCORED")}\n'
                 + "\n".join(
-                    f'Market reaction +{item["minutes_after"]}m: {item["market"]} {item["direction"]} '
+                    f'Market reaction +{item["minutes_after"]}m: {item["market"]} '
+                    f'currency {item["direction"]} / pair {item.get("pair_direction", "N/A")} '
                     f'(ADX {item.get("adx")}, RSI {item.get("rsi")})'
                     for item in report.get("market_reactions", [])
+                )
+                + "\n" + "\n".join(
+                    f'Coverage +{item["minutes_after"]}m: '
+                    f'{len(item.get("available_markets", []))}/{len(item.get("expected_markets", []))} markets '
+                    + (", unavailable: " + ", ".join(item.get("unavailable_markets", {})) if item.get("unavailable_markets") else "")
+                    for item in report.get("market_reaction_coverage", [])
                 )
                 + "\n" + "\n".join("• " + x for x in analysis["reasons"])
             )
@@ -416,6 +423,15 @@ async def handle_event_callback(update, context):
             + ("\n\nPost-release report: available." if report else "\n\nPost-release report: awaiting official actual data.")
         )
         latest_checkpoint = checkpoints.get("5m") or checkpoints.get("15m") or {}
+        saved_market_snapshots = latest_checkpoint.get("market_technical_snapshots") or {}
+        if saved_market_snapshots:
+            caption += "\n\nINDEPENDENT MARKET TECHNICAL HISTORY:\n" + "\n".join(
+                f'{market}: pair {item.get("direction", "UNAVAILABLE")} / '
+                f'{event.get("currency", "USD")} {item.get("currency_direction", "UNAVAILABLE")} '
+                f'(ADX {item.get("adx", "N/A")}, RSI {item.get("rsi", "N/A")}, '
+                f'ATR {item.get("atr", "N/A")}, breakout {item.get("breakout", "N/A")})'
+                for market, item in saved_market_snapshots.items()
+            )
         history_plan = latest_checkpoint.get("trade_plan") or {}
         caption += (
             "\n\nTRADE TIMEFRAME: "
@@ -620,6 +636,20 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         if snapshot.get("status") == "AVAILABLE" else
         "Technical confirmation unavailable: " + snapshot.get("reason", "data unavailable")
     )
+    market_snapshot_lines = []
+    for market, item in (record.get("market_technical_snapshots") or {}).items():
+        market_snapshot_lines.append(
+            f'{market}: pair {item.get("direction", "UNAVAILABLE")} | '
+            f'{event.get("currency", "USD")} {item.get("currency_direction", "UNAVAILABLE")} | '
+            f'ADX {item.get("adx", "N/A")} | RSI {item.get("rsi", "N/A")} | '
+            f'ATR {item.get("atr", "N/A")} | breakout {item.get("breakout", "N/A")}'
+        )
+    market_technical_text = "\n".join(market_snapshot_lines) or "No per-market technical snapshots saved."
+    market_plan_lines = [
+        f'{market}: {plan.get("status", "NO_TRADE")} — {plan.get("reason", "See conditional setup details below.")}'
+        for market, plan in (record.get("market_trade_plans") or {}).items()
+    ]
+    market_plan_text = "\n".join(market_plan_lines)
     news_lines = "\n".join(
         f'• {item.get("title", "Headline")}: {item.get("description", "")[:180]}'
         for item in event.get("research_news", [])[:3]
@@ -637,7 +667,9 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f'Fundamental direction: {analysis.get("fundamental_direction", analysis["direction"])}\n'
         f'Technical direction: {analysis.get("technical_direction", "NOT PROVIDED")}\n'
         f'Combined forecast: {analysis.get("combined_direction", analysis["direction"])} | Confidence: {analysis["confidence"]}/100\n'
-        f'Technical: {technical_text}\n\nAffected market bias:\n{market_lines}\n\n'
+        f'Technical summary: {technical_text}\n\nAffected market bias:\n{market_lines}\n\n'
+        f'INDEPENDENT PER-MARKET TECHNICAL CHECKS:\n{market_technical_text}\n\n'
+        + ("PER-MARKET TRADE PLAN STATUS:\n" + market_plan_text + "\n\n" if market_plan_text else "")
         + "\n".join("• " + reason for reason in analysis["reasons"])
         + ("\n\nLATEST ECONOMIC NEWS:\n" + news_lines if news_lines else "")
         + ("\n\n10Y GOVERNMENT BOND YIELDS:\n" + yield_lines if yield_lines else "")
