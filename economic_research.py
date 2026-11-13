@@ -260,7 +260,14 @@ async def technical_snapshot(event: dict, checkpoint: str, market: str | None = 
             "market": market or None,
             "reason": "No active market is available for this event currency.",
         }
-    timeframe = "5m" if checkpoint in {"15m", "5m"} else "15m"
+    if checkpoint == "post_1m":
+        timeframe = "1m"
+    elif checkpoint == "post_5m":
+        timeframe = "5m"
+    elif str(checkpoint).startswith("post_"):
+        timeframe = "15m"
+    else:
+        timeframe = "5m" if checkpoint in {"15m", "5m"} else "15m"
     try:
         frame = await market_data.fetch_candles(
             market,
