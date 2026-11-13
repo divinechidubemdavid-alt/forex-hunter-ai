@@ -174,6 +174,107 @@ class EconomicEventTests(unittest.TestCase):
         self.assertEqual(report["actual"], "3.4")
         self.assertEqual(ee.get_event(item["id"])["post_event_report"], report)
 
+    def test_market_currency_direction_uses_consensus_and_rejects_ties(self):
+        self.assertEqual(
+            ee.aggregate_market_currency_direction({
+                "XAU/USD": {"status": "AVAILABLE", "currency_direction": "BULLISH"},
+                "GBP/USD": {"status": "AVAILABLE", "currency_direction": "BULLISH"},
+                "USD/JPY": {"status": "AVAILABLE", "currency_direction": "BEARISH"},
+            }),
+            "BULLISH",
+        )
+        self.assertIsNone(ee.aggregate_market_currency_direction({
+            "XAU/USD": {"status": "AVAILABLE", "currency_direction": "BULLISH"},
+            "USD/JPY": {"status": "AVAILABLE", "currency_direction": "BEARISH"},
+        }))
+
+    def test_15m_checkpoint_saves_independent_snapshots_for_all_active_markets(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        snapshots = {
+            market: {
+                "status": "AVAILABLE", "market": market,
+                "direction": "BULLISH", "currency_direction": "BULLISH",
+                "adx": 25, "breakout": "NONE", "volatility_pct": 0.2,
+            }
+            for market in ("XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD")
+        }
+        record = ee.record_checkpoint(
+            item["id"], "15m", technical="BULLISH",
+            technical_snapshot=snapshots["XAU/USD"],
+            market_technical_snapshots=snapshots,
+        )
+        self.assertEqual(set(record["market_technical_snapshots"]), set(snapshots))
+        self.assertEqual(set(ee.get_event(item["id"])["final_15m"]["market_technical_snapshots"]), set(snapshots))
+
+    def test_5m_checks_each_market_and_preserves_15m_when_one_is_unavailable(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        baseline = {
+            market: {
+                "status": "AVAILABLE", "market": market,
+                "direction": "BULLISH", "currency_direction": "BULLISH",
+                "adx": 25, "breakout": "NONE", "volatility_pct": 0.2,
+            }
+            for market in ("XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD")
+        }
+        first = ee.record_checkpoint(
+            item["id"], "15m", technical="BULLISH",
+            technical_snapshot=baseline["XAU/USD"], market_technical_snapshots=baseline,
+        )
+        current = {key: dict(value) for key, value in baseline.items()}
+        current["USD/JPY"] = {"status": "UNAVAILABLE", "market": "USD/JPY", "reason": "API cooldown"}
+        verified = ee.record_checkpoint(
+            item["id"], "5m", technical="BULLISH",
+            technical_snapshot=baseline["XAU/USD"], market_technical_snapshots=current,
+        )
+        self.assertEqual(verified["verification"], "UNAVAILABLE")
+        self.assertEqual(verified["analysis"], first["analysis"])
+
+    def test_5m_records_market_specific_material_reversal(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        baseline = {
+            market: {
+                "status": "AVAILABLE", "market": market,
+                "direction": "BULLISH", "currency_direction": "BULLISH",
+                "adx": 25, "breakout": "NONE", "volatility_pct": 0.2,
+            }
+            for market in ("XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD")
+        }
+        ee.record_checkpoint(
+            item["id"], "15m", technical="BULLISH",
+            technical_snapshot=baseline["XAU/USD"], market_technical_snapshots=baseline,
+        )
+        current = {key: dict(value) for key, value in baseline.items()}
+        current["XAU/USD"].update({
+            "direction": "BEARISH", "currency_direction": "BULLISH",
+            "adx": 35, "breakout": "DOWNSIDE_BREAKOUT", "volatility_pct": 0.5,
+        })
+        verified = ee.record_checkpoint(
+            item["id"], "5m", technical="BULLISH",
+            technical_snapshot=current["XAU/USD"], market_technical_snapshots=current,
+        )
+        self.assertEqual(verified["verification"], "REVIEWED_MATERIAL_CHANGE")
+        self.assertTrue(any("XAU/USD:" in change for change in verified["material_changes"]))
+
+    def test_reaction_coverage_is_saved_and_reaction_retries_replace_duplicates(self):
+        item = self.event(forecast="3.1", previous="3.2")
+        ee.record_actual(item["id"], "3.4")
+        snapshot = {
+            "status": "AVAILABLE", "market": "GBP/USD",
+            "currency_direction": "BEARISH", "direction": "BULLISH",
+            "adx": 28, "rsi": 42, "volatility_pct": 0.3,
+            "breakout": "NONE", "source": "test",
+        }
+        ee.record_market_reaction(item["id"], snapshot, 5)
+        ee.record_market_reaction(item["id"], snapshot, 5)
+        ee.record_market_reaction_coverage(
+            item["id"], 5, ["XAU/USD", "GBP/USD"],
+            ["GBP/USD"], {"XAU/USD": "API cooldown"},
+        )
+        report = ee.get_event(item["id"])["post_event_report"]
+        self.assertEqual(len(report["market_reactions"]), 1)
+        self.assertEqual(report["market_reaction_coverage"][0]["available_markets"], ["GBP/USD"])
+        self.assertEqual(report["market_reaction_coverage"][0]["unavailable_markets"]["XAU/USD"], "API cooldown")
+
     def test_post_release_reaction_windows_cover_immediate_to_24_hours(self):
         self.assertEqual(
             ee.POST_RELEASE_CHECKPOINTS,
@@ -199,8 +300,8 @@ class EconomicEventTests(unittest.TestCase):
         ee.record_actual(item["id"], "3.4")
         report = ee.record_market_reaction(
             item["id"],
-            {"status": "AVAILABLE", "market": "EUR/USD", "currency_direction": "BEARISH",
-             "direction": "BEARISH", "adx": 28, "rsi": 42, "volatility_pct": 0.3,
+            {"status": "AVAILABLE", "market": "GBP/USD", "currency_direction": "BEARISH",
+             "direction": "BULLISH", "adx": 28, "rsi": 42, "volatility_pct": 0.3,
              "breakout": "NONE", "source": "test"},
             5,
         )
@@ -215,8 +316,8 @@ class EconomicEventTests(unittest.TestCase):
         ee.record_actual(item["id"], "1.2")
         report = ee.record_market_reaction(
             item["id"],
-            {"status": "AVAILABLE", "market": "EUR/USD", "currency_direction": "BULLISH",
-             "direction": "BEARISH", "source": "test"},
+            {"status": "AVAILABLE", "market": "USD/JPY", "currency_direction": "BULLISH",
+             "direction": "BULLISH", "source": "test"},
             5,
         )
         self.assertEqual(report["forecast_score"], "Directional alignment only: 1/1 windows (100%)")
