@@ -318,12 +318,13 @@ class EconomicEventTests(unittest.TestCase):
         item = self.event(forecast="3.4", previous="3.2")
         item["higher_is_better"] = True
         analysis = ee.directional_analysis(item)
-        self.assertEqual(analysis["market_biases"]["EUR/USD"], "SELL")
-        self.assertEqual(analysis["market_biases"]["USD/JPY"], "BUY")
         self.assertEqual(analysis["market_biases"]["XAU/USD"], "SELL")
+        self.assertEqual(analysis["market_biases"]["GBP/USD"], "SELL")
+        self.assertEqual(analysis["market_biases"]["USD/JPY"], "BUY")
+        self.assertEqual(analysis["market_biases"]["BTC/USD"], "SELL")
         self.assertEqual(
             set(analysis["market_biases"]),
-            {"EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"},
+            {"XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD"},
         )
 
 
