@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,7 @@ import httpx
 
 import market_data
 import state
+from config import MARKETS
 from strategy import calculate_indicators
 
 log = logging.getLogger(__name__)
@@ -239,28 +241,52 @@ async def fetch_bls_release_actual(event: dict) -> dict | None:
     }
 
 def _market_for_currency(currency: str) -> str | None:
+    # Use only a directly relevant active market; USD releases default to Gold.
     return {
-        "USD": "EUR/USD", "EUR": "EUR/USD", "GBP": "GBP/USD",
+        "USD": "XAU/USD", "GBP": "GBP/USD",
         "JPY": "USD/JPY", "XAU": "XAU/USD",
     }.get(str(currency).upper())
 
-async def technical_snapshot(event: dict, checkpoint: str) -> dict:
+
+async def technical_snapshot(event: dict, checkpoint: str, market: str | None = None) -> dict:
     """Run closed-candle EMA/ADX/RSI/ATR and breakout-retest context.
 
     Event checks are charged to the existing local Twelve Data safety ceiling.
     No event-specific request can bypass the shared 800/day counter.
     """
-    market = _market_for_currency(event.get("currency", "USD"))
-    if not market:
-        return {"status": "UNAVAILABLE", "reason": "No configured proxy market for this currency."}
-    timeframe = "5m" if checkpoint in {"15m", "5m"} else "15m"
+    market = str(market or _market_for_currency(event.get("currency", "USD")) or "").upper()
+    if market not in MARKETS:
+        return {
+            "status": "UNAVAILABLE",
+            "market": market or None,
+            "reason": "No active market is available for this event currency.",
+        }
+    if checkpoint == "post_1m":
+        timeframe = "1m"
+    elif checkpoint == "post_5m":
+        timeframe = "5m"
+    elif str(checkpoint).startswith("post_"):
+        timeframe = "15m"
+    else:
+        timeframe = "5m" if checkpoint in {"15m", "5m"} else "15m"
     try:
-        frame = await market_data.fetch_candles(
-            market,
-            outputsize=180,
-            interval=timeframe,
-            purpose="gold_monitor" if market == "XAU/USD" else "auto",
-        )
+        frame = None
+        for attempt in range(4):
+            try:
+                frame = await market_data.fetch_candles(
+                    market,
+                    outputsize=180,
+                    interval=timeframe,
+                    purpose="auto",
+                )
+                break
+            except market_data.MarketDataError as exc:
+                cooldown = re.search(r"Try again in ([0-9.]+) seconds", str(exc))
+                if not cooldown or attempt == 3:
+                    raise
+                # Respect the shared eight-second provider throttle instead of
+                # silently dropping the remaining affected markets in this checkpoint.
+                await asyncio.sleep(float(cooldown.group(1)) + 0.25)
         data = calculate_indicators(frame).dropna()
         if len(data) < 40:
             return {"status": "UNAVAILABLE", "reason": "Insufficient completed candles.", "market": market}
@@ -348,14 +374,17 @@ def material_change(baseline: dict, current: dict) -> tuple[bool, list[str]]:
     return bool(changes), changes
 
 async def auto_actual_release(event: dict) -> dict | None:
-    """Prefer licensed global calendar actuals; fall back to official BLS API."""
+    """Prefer a matching free official BLS actual; use licensed data only as fallback."""
+    try:
+        official = await fetch_bls_release_actual(event)
+        if official:
+            return official
+    except Exception:
+        log.exception("Official BLS actual lookup failed; checking optional provider fallback")
     try:
         import trading_economics
         if trading_economics.configured() and event.get("provider_calendar_id"):
-            result = await trading_economics.fetch_event_actual(event)
-            if result:
-                return result
+            return await trading_economics.fetch_event_actual(event)
     except Exception:
-        # Do not silently invent or replace an official value; try the supported BLS source.
-        log.exception("Trading Economics actual lookup failed; trying BLS fallback")
-    return await fetch_bls_release_actual(event)
+        log.exception("Optional Trading Economics actual lookup failed")
+    return None

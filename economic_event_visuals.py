@@ -200,6 +200,18 @@ def render_performance_dashboard(events: list[dict], stats: dict):
         ax.add_patch(Rectangle((122, 24+i*4.2), 1.5, 1.5, facecolor=color, edgecolor="none"))
         ax.text(124, 24.2+i*4.2, label, color=TEXT, fontsize=6.5)
 
+    market_stats = stats.get("by_market", {})
+    market_accuracy_text = "MARKET ACCURACY: " + (
+        "  |  ".join(
+            f'{market} {values.get("accuracy_pct") if values.get("accuracy_pct") is not None else "N/A"}%'
+            + (
+                f' (24h {values.get("final_24h_accuracy_pct")}%)'
+                if values.get("final_24h_accuracy_pct") is not None else ""
+            )
+            for market, values in sorted(market_stats.items())
+        ) if market_stats else "No market-by-market reaction evidence yet"
+    )
+    ax.text(5, 18, market_accuracy_text[:150], color=GOLD, fontsize=8, weight="bold")
     ax.text(5, 14, f'PARTIAL WINS: {stats.get("partial_wins", 0)}     NO-TRADE DECISIONS: {stats.get("no_trade", 0)}     '
                     f'ACTIVE TRACKING: {stats.get("monitoring", 0)}     AVG CONFIDENCE: '
                     f'{stats.get("average_confidence") if stats.get("average_confidence") is not None else "N/A"}',

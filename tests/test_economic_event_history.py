@@ -51,6 +51,49 @@ class EconomicEventHistoryTests(unittest.TestCase):
         self.assertEqual(result["directional_accuracy_pct"], 50.0)
         self.assertEqual(result["unscored"], 1)
 
+    def test_performance_scores_each_market_and_each_post_release_horizon(self):
+        event = {
+            "final_15m": {
+                "analysis": {
+                    "combined_direction": "BULLISH",
+                    "market_biases": {"XAU/USD": "SELL", "GBP/USD": "SELL", "USD/JPY": "BUY"},
+                }
+            },
+            "post_event_report": {
+                "analysis": {"combined_direction": "BULLISH"},
+                "market_reactions": [
+                    {"minutes_after": 1, "market": "XAU/USD", "direction": "BULLISH", "pair_direction": "BEARISH"},
+                    {"minutes_after": 5, "market": "XAU/USD", "direction": "BULLISH", "pair_direction": "BEARISH"},
+                    {"minutes_after": 1, "market": "GBP/USD", "direction": "BEARISH", "pair_direction": "BULLISH"},
+                    {"minutes_after": 1440, "market": "GBP/USD", "direction": "BULLISH", "pair_direction": "BEARISH"},
+                    {"minutes_after": 1440, "market": "USD/JPY", "direction": "BULLISH", "pair_direction": "BULLISH"},
+                ],
+            },
+        }
+        result = performance_summary([event])
+        self.assertEqual(result["by_market"]["XAU/USD"]["accuracy_pct"], 100.0)
+        self.assertEqual(result["by_market"]["GBP/USD"]["accuracy_pct"], 50.0)
+        self.assertEqual(result["by_market"]["GBP/USD"]["final_24h_accuracy_pct"], 100.0)
+        self.assertEqual(result["by_market"]["USD/JPY"]["final_24h_accuracy_pct"], 100.0)
+        self.assertEqual(result["by_horizon"]["1m"]["observations"], 2)
+        self.assertEqual(result["by_horizon"]["1440m"]["observations"], 2)
+        self.assertEqual(result["directional_scored"], 1)
+        self.assertEqual(result["directional_correct"], 1)
+
+    def test_checkpoint_conversation_includes_per_market_technical_summary(self):
+        rows = event_conversation({
+            "history": [{
+                "checkpoint": "15m", "created_at": "2026-11-07T10:00:00+00:00",
+                "analysis": {"direction": "BULLISH", "confidence": 70, "reasons": []},
+                "market_technical_snapshots": {
+                    "XAU/USD": {"direction": "BEARISH", "adx": 24},
+                    "GBP/USD": {"direction": "BULLISH", "adx": 28},
+                },
+            }]
+        })
+        self.assertIn("XAU/USD BEARISH", rows[0]["summary"])
+        self.assertIn("GBP/USD BULLISH", rows[0]["summary"])
+
     def test_events_without_a_final_checkpoint_are_not_counted_as_neutral(self):
         result = performance_summary([{"status": "scheduled"}])
         self.assertEqual(result["not_finalized"], 1)

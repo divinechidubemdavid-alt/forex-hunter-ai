@@ -4,6 +4,7 @@ from unittest.mock import patch
 import config
 import state
 from auto_scanner import _eligible_markets
+from bot import _active_market_tracked_signals
 from market_scope import get_session_markets, is_market_allowed
 from zoneinfo import ZoneInfo
 from datetime import datetime
@@ -13,11 +14,11 @@ class MarketScopeTests(unittest.TestCase):
     def test_only_requested_markets_are_configured(self):
         self.assertEqual(
             set(config.MARKETS),
-            {"XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY", "BTC/USD"},
+            {"XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD"},
         )
 
     def test_weekdays_include_gold_and_three_forex_pairs_only(self):
-        expected = ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY"]
+        expected = ["XAU/USD", "GBP/USD", "USD/JPY"]
         self.assertEqual(get_session_markets(config.MARKETS, 0), expected)
         self.assertNotIn("BTC/USD", get_session_markets(config.MARKETS, 0))
 
@@ -33,12 +34,26 @@ class MarketScopeTests(unittest.TestCase):
         now = datetime(2026, 11, 9, 12, 0, tzinfo=ZoneInfo("Africa/Lagos"))
         self.assertEqual(
             _eligible_markets(now),
-            ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY"],
+            ["XAU/USD", "GBP/USD", "USD/JPY"],
         )
 
     def test_automatic_scanner_is_bitcoin_only_on_weekends(self):
         now = datetime(2026, 11, 14, 12, 0, tzinfo=ZoneInfo("Africa/Lagos"))
         self.assertEqual(_eligible_markets(now), ["BTC/USD"])
+
+
+class ActiveTrackedMarketScopeTests(unittest.TestCase):
+    def test_retired_market_signals_are_hidden_from_active_tracking_not_deleted(self):
+        rows = [
+            {"id": "1", "symbol": "XAU/USD", "status": "TRACKING"},
+            {"id": "2", "symbol": "EUR/USD", "status": "TRACKING"},
+            {"id": "3", "symbol": "GBP/USD", "status": "TRACKING"},
+        ]
+        with patch("bot.state.get_tracked_signals", return_value=rows):
+            visible = _active_market_tracked_signals("123")
+        self.assertEqual([item["id"] for item in visible], ["1", "3"])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[1]["symbol"], "EUR/USD")
 
 
 class ApiBudgetProtectionTests(unittest.TestCase):
@@ -108,7 +123,7 @@ class ApiBudgetProtectionTests(unittest.TestCase):
             user = state.ensure_user("123")
         self.assertEqual(
             user["markets"],
-            ["XAU/USD", "EUR/USD", "BTC/USD"],
+            ["XAU/USD", "BTC/USD"],
         )
 
     def test_utc_day_rollover_resets_all_api_pools(self):

@@ -17,7 +17,7 @@ import httpx
 import economic_events as ee
 import economic_research as research
 import state
-from config import WEEKDAY_MARKETS
+from config import MARKETS
 
 log = logging.getLogger(__name__)
 WAT = ZoneInfo("Africa/Lagos")
@@ -264,13 +264,11 @@ def _combine(ai: dict, technical: str | None) -> dict:
     reasons.extend(ai.get("risk_factors", [])[:4])
     currency = str(ai.get("currency") or "USD").upper()
     pairs = {
-        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"],
-        "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
+        "USD": ["XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD"],
+        "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
         "XAU": ["XAU/USD"],
     }.get(currency, [])
-    # Economic-event directional outputs follow the weekday trading universe.
-    # BTC/USD is reserved for weekend trading and retired pairs are excluded.
-    pairs = [pair for pair in pairs if pair in WEEKDAY_MARKETS]
+    pairs = [pair for pair in pairs if pair in MARKETS]
     market_biases = {}
     for pair in pairs:
         base, quote = pair.split("/")
@@ -312,8 +310,8 @@ def install() -> None:
     original_snapshot = research.technical_snapshot
     original_checkpoint = ee.record_checkpoint
 
-    async def snapshot_with_ai(event: dict, checkpoint: str) -> dict:
-        snapshot = await original_snapshot(event, checkpoint)
+    async def snapshot_with_ai(event: dict, checkpoint: str, market: str | None = None) -> dict:
+        snapshot = await original_snapshot(event, checkpoint, market=market)
         # Five-minute review reuses the 15-minute AI view unless evidence materially changed.
         ai_result = None
         if checkpoint == "5m":
@@ -322,7 +320,8 @@ def install() -> None:
             old_evidence = baseline.get("event_evidence") or {}
             new_evidence = ee._event_evidence(event)
             event_changes = ee._material_event_change(old_evidence, new_evidence)
-            baseline_technical = baseline.get("technical_snapshot") or {}
+            baseline_market_snapshots = baseline.get("market_technical_snapshots") or {}
+            baseline_technical = baseline_market_snapshots.get(market) or baseline.get("technical_snapshot") or {}
             technical_changes = []
             if baseline_technical.get("status") == "AVAILABLE" and snapshot.get("status") == "AVAILABLE":
                 _, technical_changes = research.material_change(baseline_technical, snapshot)
@@ -337,10 +336,11 @@ def install() -> None:
         snapshot["_ai_checkpoint"] = checkpoint
         return snapshot
 
-    def checkpoint_with_ai(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None):
+    def checkpoint_with_ai(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None, market_technical_snapshots=None):
         record = original_checkpoint(
             event_id, checkpoint, technical=technical, evidence_note=evidence_note,
             technical_snapshot=technical_snapshot, event_evidence=event_evidence,
+            market_technical_snapshots=market_technical_snapshots,
         )
         ai_result = (technical_snapshot or {}).get("ai_interpretation")
         if checkpoint == "5m" and record.get("verification") in {

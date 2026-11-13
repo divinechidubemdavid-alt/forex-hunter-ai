@@ -14,6 +14,7 @@ from gold_monitor import (
     _recent_trendline_breakout,
     _trendline_breakout,
     classify_gold_market,
+    estimated_daily_gold_monitor_requests,
     estimated_daily_gold_requests,
 )
 
@@ -226,12 +227,12 @@ class GoldApiScheduleTests(unittest.TestCase):
         )
         self.assertEqual(GOLD_SOURCE_OUTPUTSIZE, 2000)
 
-    def test_estimated_gold_requests_fit_half_background_budget(self):
+    def test_dedicated_gold_monitor_fits_its_protected_half_budget(self):
+        self.assertEqual(estimated_daily_gold_monitor_requests(), 259)
+        self.assertLessEqual(estimated_daily_gold_monitor_requests(), 350)
+
+    def test_total_gold_usage_includes_scanner_but_scanner_is_other_pool(self):
         self.assertEqual(estimated_daily_gold_requests(), 307)
-        self.assertLessEqual(
-            estimated_daily_gold_requests(),
-            350,
-        )
 
     def test_weekend_cycle_makes_no_gold_api_request(self):
         class App:

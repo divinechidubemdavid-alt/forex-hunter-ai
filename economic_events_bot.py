@@ -15,6 +15,7 @@ import economic_event_visuals as event_visuals
 import economic_research as research
 import trading_economics as te
 import state
+from config import MARKETS
 
 log = logging.getLogger(__name__)
 WAT = ZoneInfo("Africa/Lagos")
@@ -32,11 +33,9 @@ def event_center_keyboard():
 
 
 async def _sync_calendars():
-    if te.configured():
-        try:
-            return len(await te.fetch_calendar_events()), "Trading Economics global calendar"
-        except Exception:
-            log.exception("Licensed global calendar sync failed; using official-source fallback")
+    # Free official sources are always checked first. A licensed provider is
+    # optional enrichment for consensus/news/revisions, never a replacement
+    # for the official BLS, Federal Reserve and BEA calendars.
     total = 0
     successes = 0
     failures = []
@@ -53,11 +52,23 @@ async def _sync_calendars():
         except Exception as exc:
             failures.append(label)
             log.exception("%s calendar sync failed", label)
-    # A successful importer may return zero because there are no new dates to add.
-    # Only report total failure when every official source raised an exception.
+
+    if te.configured():
+        try:
+            imported = await te.fetch_calendar_events()
+            successes += 1
+            total += len(imported)
+            log.info("Licensed calendar enrichment completed; %d new events imported", len(imported))
+        except Exception:
+            failures.append("licensed Trading Economics")
+            log.exception("Licensed global calendar enrichment failed")
+
+    # A successful importer may return zero because there are no new dates.
     if failures and successes == 0:
-        raise RuntimeError("All official calendar imports failed: " + ", ".join(failures))
-    source = "official BLS, Federal Reserve and BEA calendars"
+        raise RuntimeError("All economic calendar sources failed: " + ", ".join(failures))
+    source = "free official BLS, Federal Reserve and BEA calendars"
+    if te.configured() and "licensed Trading Economics" not in failures:
+        source += " plus optional licensed consensus/news enrichment"
     if failures:
         source += " (partial; failed: " + ", ".join(failures) + ")"
     return total, source
@@ -345,9 +356,16 @@ async def handle_event_callback(update, context):
                 f'Confidence: {analysis["confidence"]}/100\n'
                 f'Forecast score: {report.get("forecast_score", "UNSCORED")}\n'
                 + "\n".join(
-                    f'Market reaction +{item["minutes_after"]}m: {item["market"]} {item["direction"]} '
+                    f'Market reaction +{item["minutes_after"]}m: {item["market"]} '
+                    f'currency {item["direction"]} / pair {item.get("pair_direction", "N/A")} '
                     f'(ADX {item.get("adx")}, RSI {item.get("rsi")})'
                     for item in report.get("market_reactions", [])
+                )
+                + "\n" + "\n".join(
+                    f'Coverage +{item["minutes_after"]}m: '
+                    f'{len(item.get("available_markets", []))}/{len(item.get("expected_markets", []))} markets '
+                    + (", unavailable: " + ", ".join(item.get("unavailable_markets", {})) if item.get("unavailable_markets") else "")
+                    for item in report.get("market_reaction_coverage", [])
                 )
                 + "\n" + "\n".join("• " + x for x in analysis["reasons"])
             )
@@ -404,7 +422,24 @@ async def handle_event_callback(update, context):
             + ("\n\n10Y YIELDS:\n" + yields_text if yields_text else "")
             + ("\n\nPost-release report: available." if report else "\n\nPost-release report: awaiting official actual data.")
         )
-        latest_checkpoint = checkpoints.get("5m") or checkpoints.get("15m") or {}
+        latest_checkpoint = checkpoints.get("5m") or {}
+        if not latest_checkpoint.get("market_technical_snapshots") and not latest_checkpoint.get("market_trade_plans"):
+            latest_checkpoint = checkpoints.get("15m") or latest_checkpoint
+        saved_market_snapshots = latest_checkpoint.get("market_technical_snapshots") or {}
+        if saved_market_snapshots:
+            caption += "\n\nINDEPENDENT MARKET TECHNICAL HISTORY:\n" + "\n".join(
+                f'{market}: pair {item.get("direction", "UNAVAILABLE")} / '
+                f'{event.get("currency", "USD")} {item.get("currency_direction", "UNAVAILABLE")} '
+                f'(ADX {item.get("adx", "N/A")}, RSI {item.get("rsi", "N/A")}, '
+                f'ATR {item.get("atr", "N/A")}, breakout {item.get("breakout", "N/A")})'
+                for market, item in saved_market_snapshots.items()
+            )
+        saved_market_plans = latest_checkpoint.get("market_trade_plans") or {}
+        if saved_market_plans:
+            caption += "\n\nPER-MARKET TRADE PLAN STATUS:\n" + "\n".join(
+                f'{market}: {plan.get("status", "NO_TRADE")} — {plan.get("reason", "See plan details.")}'
+                for market, plan in saved_market_plans.items()
+            )
         history_plan = latest_checkpoint.get("trade_plan") or {}
         caption += (
             "\n\nTRADE TIMEFRAME: "
@@ -609,6 +644,20 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         if snapshot.get("status") == "AVAILABLE" else
         "Technical confirmation unavailable: " + snapshot.get("reason", "data unavailable")
     )
+    market_snapshot_lines = []
+    for market, item in (record.get("market_technical_snapshots") or {}).items():
+        market_snapshot_lines.append(
+            f'{market}: pair {item.get("direction", "UNAVAILABLE")} | '
+            f'{event.get("currency", "USD")} {item.get("currency_direction", "UNAVAILABLE")} | '
+            f'ADX {item.get("adx", "N/A")} | RSI {item.get("rsi", "N/A")} | '
+            f'ATR {item.get("atr", "N/A")} | breakout {item.get("breakout", "N/A")}'
+        )
+    market_technical_text = "\n".join(market_snapshot_lines) or "No per-market technical snapshots saved."
+    market_plan_lines = [
+        f'{market}: {plan.get("status", "NO_TRADE")} — {plan.get("reason", "See conditional setup details below.")}'
+        for market, plan in (record.get("market_trade_plans") or {}).items()
+    ]
+    market_plan_text = "\n".join(market_plan_lines)
     news_lines = "\n".join(
         f'• {item.get("title", "Headline")}: {item.get("description", "")[:180]}'
         for item in event.get("research_news", [])[:3]
@@ -626,7 +675,9 @@ async def _send_event_alert(application, event, checkpoint, record, market_chart
         f'Fundamental direction: {analysis.get("fundamental_direction", analysis["direction"])}\n'
         f'Technical direction: {analysis.get("technical_direction", "NOT PROVIDED")}\n'
         f'Combined forecast: {analysis.get("combined_direction", analysis["direction"])} | Confidence: {analysis["confidence"]}/100\n'
-        f'Technical: {technical_text}\n\nAffected market bias:\n{market_lines}\n\n'
+        f'Technical summary: {technical_text}\n\nAffected market bias:\n{market_lines}\n\n'
+        f'INDEPENDENT PER-MARKET TECHNICAL CHECKS:\n{market_technical_text}\n\n'
+        + ("PER-MARKET TRADE PLAN STATUS:\n" + market_plan_text + "\n\n" if market_plan_text else "")
         + "\n".join("• " + reason for reason in analysis["reasons"])
         + ("\n\nLATEST ECONOMIC NEWS:\n" + news_lines if news_lines else "")
         + ("\n\n10Y GOVERNMENT BOND YIELDS:\n" + yield_lines if yield_lines else "")
@@ -713,21 +764,65 @@ async def economic_events_loop(application):
                 if event.get("status") == "released" and event.get("post_event_report"):
                     elapsed = now - ee._parse_dt(event["scheduled_at"])
                     attempts = event.setdefault("post_release_attempts", [])
-                    for minutes_after in (5, 15, 30):
-                        if elapsed >= timedelta(minutes=minutes_after) and minutes_after not in attempts:
+                    post_analysis = event.get("post_event_report", {}).get("analysis") or {}
+                    affected_markets = [
+                        market for market in post_analysis.get("affected_markets", [])
+                        if market in MARKETS
+                    ]
+                    if not affected_markets:
+                        affected_markets = [
+                            market for market in ee.directional_analysis(event, phase="post-event").get("affected_markets", [])
+                            if market in MARKETS
+                        ]
+                    for minutes_after in ee.POST_RELEASE_CHECKPOINTS:
+                        target = timedelta(minutes=minutes_after)
+                        if elapsed < target or minutes_after in attempts:
+                            continue
+                        # Never label a late catch-up quote as an earlier reaction.
+                        # The scheduler polls every 20 seconds; a 90-second grace
+                        # window allows a small delay without falsifying timestamps.
+                        if elapsed > target + timedelta(seconds=90):
                             attempts.append(minutes_after)
+                            ee.record_market_reaction_coverage(
+                                event["id"], minutes_after, affected_markets, [],
+                                {market: "MISSED_OBSERVATION_WINDOW" for market in affected_markets},
+                            )
                             ee.save_event(event)
+                            event = ee.get_event(event["id"]) or event
+                            attempts = event.setdefault("post_release_attempts", [])
+                            continue
+                        reaction_checkpoint = (
+                            "post_1m" if minutes_after == 1 else
+                            "post_5m" if minutes_after == 5 else
+                            "post_15m"
+                        )
+                        available_markets = []
+                        unavailable_markets = {}
+                        for market in affected_markets:
                             try:
                                 reaction = await research.technical_snapshot(
-                                    event, "15m" if minutes_after >= 15 else "5m"
+                                    event, reaction_checkpoint, market=market
                                 )
                                 reaction.pop("_frame", None)
                                 if reaction.get("status") == "AVAILABLE":
                                     ee.record_market_reaction(event["id"], reaction, minutes_after)
-                            except Exception:
-                                log.exception("Post-release market reaction check failed")
-                            event = ee.get_event(event["id"]) or event
-                            attempts = event.setdefault("post_release_attempts", [])
+                                    available_markets.append(market)
+                                else:
+                                    unavailable_markets[market] = reaction.get("reason", "MARKET_DATA_UNAVAILABLE")
+                            except Exception as exc:
+                                unavailable_markets[market] = str(exc)
+                                log.exception(
+                                    "Post-release reaction unavailable for %s (%s minutes)",
+                                    market, minutes_after,
+                                )
+                        ee.record_market_reaction_coverage(
+                            event["id"], minutes_after, affected_markets,
+                            available_markets, unavailable_markets,
+                        )
+                        attempts.append(minutes_after)
+                        ee.save_event(event)
+                        event = ee.get_event(event["id"]) or event
+                        attempts = event.setdefault("post_release_attempts", [])
                 for checkpoint in ee.due_checkpoints(event, now):
                     if te.configured() and event.get("provider_calendar_id"):
                         try:
@@ -769,9 +864,31 @@ async def economic_events_loop(application):
                             ee.save_event(event)
                             log.exception("Official fallback event context unavailable for %s", event.get("title"))
                     event = ee.get_event(event["id"]) or event
-                    snapshot = await research.technical_snapshot(event, checkpoint)
-                    frame = snapshot.pop("_frame", None)
+                    event_markets = [
+                        market for market in ee.directional_analysis(event).get("affected_markets", [])
+                        if market in MARKETS
+                    ]
+                    market_snapshots = {}
+                    market_frames = {}
+                    for market in event_markets:
+                        market_snapshot = await research.technical_snapshot(
+                            event, checkpoint, market=market
+                        )
+                        frame = market_snapshot.pop("_frame", None)
+                        if frame is not None:
+                            market_frames[market] = frame
+                        market_snapshots[market] = market_snapshot
+                    primary_market = next(
+                        (market for market in ("XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD")
+                         if market in market_snapshots and market_snapshots[market].get("status") == "AVAILABLE"),
+                        next(iter(event_markets), None),
+                    )
+                    snapshot = market_snapshots.get(primary_market, {
+                        "status": "UNAVAILABLE", "market": primary_market,
+                        "reason": "No active affected market could be analysed.",
+                    })
                     market_chart = None
+                    frame = market_frames.get(primary_market)
                     if frame is not None:
                         try:
                             market_chart = create_market_chart(
@@ -780,11 +897,16 @@ async def economic_events_loop(application):
                             )
                         except Exception:
                             log.exception("Could not render event market chart")
-                    technical_direction = snapshot.get("currency_direction") if snapshot.get("status") == "AVAILABLE" else None
+                    technical_direction = ee.aggregate_market_currency_direction(market_snapshots)
                     record = ee.record_checkpoint(
                         event["id"], checkpoint, technical=technical_direction,
                         technical_snapshot=snapshot,
-                        evidence_note=snapshot.get("reason", ""),
+                        market_technical_snapshots=market_snapshots,
+                        evidence_note="; ".join(
+                            f"{market}: {item.get('reason', 'available')}"
+                            for market, item in market_snapshots.items()
+                            if item.get("status") != "AVAILABLE"
+                        ),
                     )
                     if checkpoint in {"15m", "5m"}:
                         if checkpoint == "5m" and record.get("verification") == "NO_15M_BASELINE":
@@ -794,14 +916,36 @@ async def economic_events_loop(application):
                                 "confirmation_timeframe": "5m", "context_timeframe": "15m",
                                 "reason": "No saved 15-minute final review; the 5-minute check cannot create an independent event trade plan.",
                             }
+                            record["market_trade_plans"] = {}
+                        elif checkpoint == "5m" and record.get("verification") == "UNAVAILABLE":
+                            record["trade_plan"] = {
+                                "status": "NO_TRADE", "execution_timeframe": "1m",
+                                "alternative_execution_timeframe": "5m",
+                                "confirmation_timeframe": "5m", "context_timeframe": "15m",
+                                "reason": "The 5-minute verification did not have fresh technical data for every affected market; the 15-minute outlook is preserved.",
+                            }
+                            record["market_trade_plans"] = {}
                         else:
-                            record["trade_plan"] = ee.build_event_trade_plan(record["analysis"], snapshot)
+                            record["market_trade_plans"] = {
+                                market: ee.build_event_trade_plan(record["analysis"], item)
+                                for market, item in market_snapshots.items()
+                            }
+                            preferred = [
+                                record["market_trade_plans"].get(market)
+                                for market in ("XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD")
+                            ]
+                            record["trade_plan"] = next(
+                                (plan for plan in preferred if plan and plan.get("status") == "CONDITIONAL_SETUP"),
+                                next((plan for plan in preferred if plan), {
+                                    "status": "NO_TRADE", "reason": "No active market produced a qualified event setup."
+                                }),
+                            )
                         saved_event = ee.get_event(event["id"]) or event
                         saved_event.setdefault("checkpoints", {})[checkpoint] = record
                         if saved_event.get("history"):
                             saved_event["history"][-1] = record
-                        # Start automatic hypothetical trade tracking only after the
-                        # 5m verification confirms a qualified conditional setup.
+                        # Keep the established single simulated event trade, while
+                        # retaining every market's independent plan in the checkpoint.
                         if checkpoint == "5m" and record.get("trade_plan", {}).get("status") == "CONDITIONAL_SETUP":
                             plan = record["trade_plan"]
                             if not saved_event.get("event_trade"):

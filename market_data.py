@@ -16,6 +16,8 @@ API_URL = "https://api.twelvedata.com/time_series"
 
 _cache = {}
 _cache_lock = asyncio.Lock()
+# Coalesce simultaneous cache misses for the same symbol/interval/output size.
+_inflight_locks = {}
 
 SUPPORTED_INTERVALS = {
     "1m": "1min",
@@ -150,67 +152,73 @@ async def fetch_candles(
     now = time.time()
 
     async with _cache_lock:
-        cached = _cache.get(cache_key)
+        request_lock = _inflight_locks.setdefault(cache_key, asyncio.Lock())
 
-        if cached and now - cached["time"] < CACHE_TTL_SECONDS:
-            return cached["data"].copy()
+    # Re-check the cache after acquiring the per-key lock. A concurrent caller
+    # may already have fetched and cached the exact same market data.
+    async with request_lock:
+        now = time.time()
+        async with _cache_lock:
+            cached = _cache.get(cache_key)
+            if cached and now - cached["time"] < CACHE_TTL_SECONDS:
+                return cached["data"].copy()
 
-    allowed, reason = await asyncio.to_thread(
-        state.reserve_api_request,
-        purpose,
-    )
-
-    if not allowed:
-        raise MarketDataError(reason)
-
-    params = {
-        "symbol": symbol,
-        "interval": provider_interval,
-        "outputsize": outputsize,
-        "apikey": TWELVE_DATA_API_KEY,
-        "format": "JSON",
-        "timezone": "UTC",
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=25) as client:
-            response = await client.get(API_URL, params=params)
-            response.raise_for_status()
-            payload = response.json()
-
-    except (httpx.HTTPError, ValueError) as exc:
-        raise MarketDataError(
-            f"Twelve Data request failed: {exc}"
-        ) from exc
-
-    if not isinstance(payload, dict):
-        raise MarketDataError(
-            "Twelve Data returned an unexpected response."
+        allowed, reason = await asyncio.to_thread(
+            state.reserve_api_request,
+            purpose,
         )
 
-    if payload.get("status") == "error" or "values" not in payload:
-        raise MarketDataError(
-            str(payload.get("message", "No candle data returned."))
-        )
+        if not allowed:
+            raise MarketDataError(reason)
 
-    try:
-        frame = _process_candles(
-            payload["values"],
-            timeframe,
-        )
-
-    except (ValueError, TypeError, KeyError) as exc:
-        raise MarketDataError(
-            f"Could not process candle data: {exc}"
-        ) from exc
-
-    async with _cache_lock:
-        _cache[cache_key] = {
-            "time": time.time(),
-            "data": frame.copy(),
+        params = {
+            "symbol": symbol,
+            "interval": provider_interval,
+            "outputsize": outputsize,
+            "apikey": TWELVE_DATA_API_KEY,
+            "format": "JSON",
+            "timezone": "UTC",
         }
 
-    return frame
+        try:
+            async with httpx.AsyncClient(timeout=25) as client:
+                response = await client.get(API_URL, params=params)
+                response.raise_for_status()
+                payload = response.json()
+
+        except (httpx.HTTPError, ValueError) as exc:
+            raise MarketDataError(
+                f"Twelve Data request failed: {exc}"
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise MarketDataError(
+                "Twelve Data returned an unexpected response."
+            )
+
+        if payload.get("status") == "error" or "values" not in payload:
+            raise MarketDataError(
+                str(payload.get("message", "No candle data returned."))
+            )
+
+        try:
+            frame = _process_candles(
+                payload["values"],
+                timeframe,
+            )
+
+        except (ValueError, TypeError, KeyError) as exc:
+            raise MarketDataError(
+                f"Could not process candle data: {exc}"
+            ) from exc
+
+        async with _cache_lock:
+            _cache[cache_key] = {
+                "time": time.time(),
+                "data": frame.copy(),
+            }
+
+        return frame
 
 
 def resample_candles(frame, timeframe):

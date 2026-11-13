@@ -263,7 +263,7 @@ async def _fetch_strong_market_frame(symbol):
                 MARKETS[symbol],
                 outputsize=500,
                 interval="15m",
-                purpose="gold_monitor" if symbol == "XAU/USD" else "auto",
+                purpose="auto",
             )
         except MarketDataError as exc:
             match = re.search(
@@ -531,8 +531,16 @@ def _tracked_signal_keyboard(signal_id):
     ])
 
 
+def _active_market_tracked_signals(user_id):
+    """Keep retired-market records in history, not in the active tracking view."""
+    return [
+        signal for signal in state.get_tracked_signals(user_id)
+        if signal.get("symbol") in MARKETS
+    ]
+
+
 async def _send_tracked_signals(chat, user_id):
-    signals = state.get_tracked_signals(user_id)
+    signals = _active_market_tracked_signals(user_id)
 
     if not signals:
         await chat.send_message(
@@ -658,7 +666,7 @@ async def _show_signal_detail(chat, user_id, signal_id):
             MARKETS[signal["symbol"]],
             outputsize=100,
             interval=timeframe,
-            purpose="gold_monitor" if signal["symbol"] == "XAU/USD" else "monitor",
+            purpose="monitor",
         )
         latest_chart_price = float(frame["close"].iloc[-1])
         caption = caption.replace(

@@ -36,12 +36,19 @@ GOLD_FETCH_SCHEDULE = {
 GOLD_AUTOMATIC_SCAN_INTERVAL_SECONDS = 30 * 60
 
 
-def estimated_daily_gold_requests():
-    """Upper-bound estimate for Gold monitor plus the 30-minute Gold scanner."""
+def estimated_daily_gold_monitor_requests():
+    """Upper-bound REST requests used by the dedicated Gold monitor alone."""
     return sum(
         86400 // interval
         for interval in GOLD_FETCH_SCHEDULE.values()
-    ) + (86400 // GOLD_AUTOMATIC_SCAN_INTERVAL_SECONDS)
+    )
+
+
+def estimated_daily_gold_requests():
+    """Total Gold requests, including the scanner charged to the other pool."""
+    return estimated_daily_gold_monitor_requests() + (
+        86400 // GOLD_AUTOMATIC_SCAN_INTERVAL_SECONDS
+    )
 
 
 def _slot_due(key, interval_seconds, now_epoch=None):

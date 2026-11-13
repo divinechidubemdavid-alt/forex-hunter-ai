@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 import state
-from config import WEEKDAY_MARKETS
+from config import MARKETS
 
 WAT = ZoneInfo("Africa/Lagos")
 
@@ -43,6 +43,9 @@ def _ics_timezone(zone_name):
 
 CHECKPOINTS = (("24h", timedelta(hours=24)), ("1h", timedelta(hours=1)),
                ("15m", timedelta(minutes=15)), ("5m", timedelta(minutes=5)))
+# Preserve the immediate reaction and evaluate whether the move reverses,
+# continues, or remains sustained through the full 24-hour window.
+POST_RELEASE_CHECKPOINTS = (1, 5, 15, 30, 60, 120, 240, 1440)
 HIGH_IMPACT_TERMS = (
     "nonfarm", "payroll", "employment situation", "job openings",
     "producer price index", "cpi", "consumer price", "fomc", "federal funds",
@@ -216,12 +219,13 @@ def directional_analysis(event, technical=None, phase="pre-event"):
         direction = fundamental_direction
     combined_direction = direction
     pairs = {
-        "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"],
-        "EUR": ["EUR/USD"], "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
+        "USD": ["XAU/USD", "GBP/USD", "USD/JPY", "BTC/USD"],
+        "GBP": ["GBP/USD"], "JPY": ["USD/JPY"],
+        "XAU": ["XAU/USD"],
     }.get(currency, [])
-    # Economic-event directional outputs follow the weekday trading universe.
-    # BTC/USD is reserved for weekend trading and retired pairs are excluded.
-    pairs = [pair for pair in pairs if pair in WEEKDAY_MARKETS]
+    # Event analysis is limited to the four active platform markets.
+    # BTC/USD is included for USD-sensitive releases; retired pairs are excluded.
+    pairs = [pair for pair in pairs if pair in MARKETS]
     market_biases = {}
     for pair in pairs:
         base, quote = pair.split("/")
@@ -395,7 +399,7 @@ def _material_event_change(previous, current):
     return changes
 
 
-def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None):
+def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", technical_snapshot=None, event_evidence=None, market_technical_snapshots=None):
     if checkpoint not in dict(CHECKPOINTS):
         raise ValueError("Unsupported event checkpoint.")
     event = get_event(event_id)
@@ -408,6 +412,7 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
         "checkpoint": checkpoint, "created_at": _now().isoformat(),
         "analysis": analysis, "evidence_note": str(evidence_note),
         "technical_snapshot": technical_snapshot or {},
+        "market_technical_snapshots": market_technical_snapshots or {},
         "event_evidence": current_event_evidence,
     }
     if checkpoint == "15m":
@@ -422,22 +427,40 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
                 baseline.get("event_evidence") or {},
                 current_event_evidence,
             )
-            baseline_technical = baseline.get("technical_snapshot") or {}
-            current_technical = technical_snapshot or {}
-            technical_available = (
-                baseline_technical.get("status") == "AVAILABLE"
-                and current_technical.get("status") == "AVAILABLE"
-            )
+            baseline_markets = baseline.get("market_technical_snapshots") or {}
+            current_markets = market_technical_snapshots or {}
             technical_changes = []
-            if technical_available:
+            if baseline_markets:
+                expected_markets = set(baseline_markets)
+                technical_available = bool(expected_markets) and all(
+                    baseline_markets.get(market, {}).get("status") == "AVAILABLE"
+                    and current_markets.get(market, {}).get("status") == "AVAILABLE"
+                    for market in expected_markets
+                )
                 from economic_research import material_change
-                _, technical_changes = material_change(baseline_technical, current_technical)
+                for market in sorted(expected_markets):
+                    old_snapshot = baseline_markets.get(market) or {}
+                    new_snapshot = current_markets.get(market) or {}
+                    if old_snapshot.get("status") == "AVAILABLE" and new_snapshot.get("status") == "AVAILABLE":
+                        _, market_changes = material_change(old_snapshot, new_snapshot)
+                        technical_changes.extend(f"{market}: {change}" for change in market_changes)
+            else:
+                baseline_technical = baseline.get("technical_snapshot") or {}
+                current_technical = technical_snapshot or {}
+                technical_available = (
+                    baseline_technical.get("status") == "AVAILABLE"
+                    and current_technical.get("status") == "AVAILABLE"
+                )
+                if technical_available:
+                    from economic_research import material_change
+                    _, technical_changes = material_change(baseline_technical, current_technical)
             changes = event_changes + technical_changes
             record["material_changes"] = changes
+            record["technical_coverage_complete"] = technical_available
             provider_status = current_event_evidence.get("provider_context_status", "NOT_CONFIGURED")
             if (
                 (not technical_available or provider_status == "UNAVAILABLE")
-                and not event_changes
+                and not changes
             ):
                 record["analysis"] = baseline["analysis"]
                 record["verification"] = "UNAVAILABLE"
@@ -450,6 +473,10 @@ def record_checkpoint(event_id, checkpoint, technical=None, evidence_note="", te
                 )
             else:
                 record["analysis"] = directional_analysis(event, technical=technical, phase=phase)
+                if not technical_available:
+                    record["analysis"]["reasons"].append(
+                        "Per-market technical coverage was incomplete; available market changes were reviewed without claiming full-market confirmation."
+                    )
                 old_direction = baseline["analysis"].get(
                     "combined_direction", baseline["analysis"].get("direction")
                 )
@@ -509,6 +536,53 @@ def record_actual(event_id, actual, revised_previous=None, notes="", details=Non
     return report
 
 
+def aggregate_market_currency_direction(market_snapshots):
+    """Return a market-consensus currency direction, or None when votes conflict."""
+    votes = [
+        snapshot.get("currency_direction")
+        for snapshot in (market_snapshots or {}).values()
+        if isinstance(snapshot, dict)
+        and snapshot.get("status") == "AVAILABLE"
+        and snapshot.get("currency_direction") in {"BULLISH", "BEARISH"}
+    ]
+    bullish = votes.count("BULLISH")
+    bearish = votes.count("BEARISH")
+    if bullish > bearish:
+        return "BULLISH"
+    if bearish > bullish:
+        return "BEARISH"
+    return None
+
+
+def record_market_reaction_coverage(event_id, minutes_after, expected_markets, available_markets, unavailable_markets=None):
+    """Persist transparent per-market coverage for a post-release observation window."""
+    event = get_event(event_id)
+    if not event or not event.get("post_event_report"):
+        raise KeyError("Post-event report not found.")
+    coverage = {
+        "minutes_after": int(minutes_after),
+        "observed_at": _now().isoformat(),
+        "expected_markets": list(expected_markets or []),
+        "available_markets": list(available_markets or []),
+        "unavailable_markets": dict(unavailable_markets or {}),
+    }
+    report = event["post_event_report"]
+    coverage_rows = report.setdefault("market_reaction_coverage", [])
+    coverage_index = next(
+        (index for index, item in enumerate(coverage_rows)
+         if item.get("minutes_after") == int(minutes_after)),
+        None,
+    )
+    if coverage_index is None:
+        coverage_rows.append(coverage)
+    else:
+        coverage_rows[coverage_index] = coverage
+    event.setdefault("history", []).append({"market_reaction_coverage": coverage})
+    event["post_event_report"] = report
+    save_event(event)
+    return coverage
+
+
 def record_market_reaction(event_id, snapshot, minutes_after):
     event = get_event(event_id)
     if not event or not event.get("post_event_report"):
@@ -526,7 +600,19 @@ def record_market_reaction(event_id, snapshot, minutes_after):
         "breakout": snapshot.get("breakout"),
         "source": snapshot.get("source", "unavailable"),
     }
-    report.setdefault("market_reactions", []).append(reaction)
+    reactions = report.setdefault("market_reactions", [])
+    existing_index = next(
+        (
+            index for index, item in enumerate(reactions)
+            if item.get("minutes_after") == int(minutes_after)
+            and item.get("market") == reaction.get("market")
+        ),
+        None,
+    )
+    if existing_index is None:
+        reactions.append(reaction)
+    else:
+        reactions[existing_index] = reaction
     expected = report.get("analysis", {}).get(
         "combined_direction", report.get("analysis", {}).get("direction")
     )

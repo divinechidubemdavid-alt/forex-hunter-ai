@@ -260,7 +260,7 @@ async def _send_signal(app, symbol, result):
 
 
 async def _fetch_scanner_frame(symbol):
-    purpose = "gold_monitor" if symbol == GOLD else "auto"
+    purpose = "auto"
     for attempt in range(5):
         try:
             return await fetch_candles(
