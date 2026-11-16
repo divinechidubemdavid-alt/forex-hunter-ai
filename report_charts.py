@@ -58,7 +58,7 @@ def _realised_r(signal):
             pass
     flags = [bool(signal.get(f"tp{i}_hit")) for i in (1, 2, 3)]
     earned = sum((i + 1) / 3 for i, hit in enumerate(flags) if hit)
-    if signal.get("status") == "STOP_LOSS":
+    if signal.get("status") in {"STOP_LOSS", "PARTIAL_WIN"}:
         earned -= 1 - sum(1 / 3 for hit in flags if hit)
     return earned
 
@@ -67,11 +67,21 @@ def create_performance_report(signals, period_label="All time"):
     signals = list(signals or [])
     eligible = [
         s for s in signals
-        if s.get("status") in {"TP3", "MANUAL_WIN", "STOP_LOSS"}
+        if s.get("status") in {"TP3", "MANUAL_WIN", "PARTIAL_WIN", "STOP_LOSS"}
+        or any(bool(s.get(f"tp{i}_hit")) for i in (1, 2, 3))
     ]
-    wins = sum(s.get("status") in {"TP3", "MANUAL_WIN"} for s in eligible)
-    losses = sum(s.get("status") == "STOP_LOSS" for s in eligible)
+    wins = sum(
+        s.get("status") in {"TP3", "MANUAL_WIN", "PARTIAL_WIN"}
+        or any(bool(s.get(f"tp{i}_hit")) for i in (1, 2, 3))
+        for s in eligible
+    )
+    losses = sum(
+        s.get("status") == "STOP_LOSS"
+        and not any(bool(s.get(f"tp{i}_hit")) for i in (1, 2, 3))
+        for s in eligible
+    )
     manual_wins = sum(s.get("status") == "MANUAL_WIN" for s in eligible)
+    partial_wins = sum(s.get("status") == "PARTIAL_WIN" for s in eligible)
     win_rate = (wins / len(eligible) * 100) if eligible else 0.0
     total_r = sum(_realised_r(s) for s in signals
                   if s.get("status") not in {"MANUALLY_STOPPED", "INVALIDATED", "AMBIGUOUS"})
@@ -109,7 +119,7 @@ def create_performance_report(signals, period_label="All time"):
     ax.text(0.03, 0.53, "OUTCOMES", transform=ax.transAxes,
             color=GOLD, fontsize=11, weight="bold")
     ax.text(0.03, 0.40,
-            f"Wins: {wins}     Losses: {losses}     Manual TP1/TP2 wins: {manual_wins}",
+            f"Wins: {wins}     Losses: {losses}     Manual wins: {manual_wins}     Partial wins: {partial_wins}",
             transform=ax.transAxes, color=TEXT, fontsize=12)
     ax.text(0.03, 0.25,
             f"Target achievements     TP1: {tp_counts[0]}     TP2: {tp_counts[1]}     TP3: {tp_counts[2]}",
@@ -118,7 +128,7 @@ def create_performance_report(signals, period_label="All time"):
             "STYLE BREAKDOWN     " + "     ".join(f"{k}: {v}" for k, v in style_counts.items()),
             transform=ax.transAxes, color=GOLD, fontsize=9)
     ax.text(0.03, 0.08,
-            "Wins include TP3 and manual closes after TP1/TP2; R uses recorded monitored prices.",
+            "Any TP milestone qualifies as a signal win; realised R remains a separate result.",
             transform=ax.transAxes, color=MUTED, fontsize=9)
     return _finish(fig, "forex_hunter_performance.png")
 

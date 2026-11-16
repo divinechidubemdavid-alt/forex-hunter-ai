@@ -717,11 +717,23 @@ async def _show_signal_detail(chat, user_id, signal_id):
 def _performance_summary(signals):
     signals = list(signals or [])
     completed = [s for s in signals if s.get("status") in {
-        "TP3", "MANUAL_WIN", "STOP_LOSS", "INVALIDATED", "AMBIGUOUS", "MANUALLY_STOPPED"
+        "TP3", "MANUAL_WIN", "PARTIAL_WIN", "STOP_LOSS", "INVALIDATED", "AMBIGUOUS", "MANUALLY_STOPPED"
     }]
-    eligible = [s for s in signals if s.get("status") in {"TP3", "MANUAL_WIN", "STOP_LOSS"}]
-    wins = sum(s.get("status") in {"TP3", "MANUAL_WIN"} for s in eligible)
-    losses = sum(s.get("status") == "STOP_LOSS" for s in eligible)
+    eligible = [
+        s for s in signals
+        if s.get("status") in {"TP3", "MANUAL_WIN", "PARTIAL_WIN", "STOP_LOSS"}
+        or any(bool(s.get(f"tp{i}_hit")) for i in (1, 2, 3))
+    ]
+    wins = sum(
+        s.get("status") in {"TP3", "MANUAL_WIN", "PARTIAL_WIN"}
+        or any(bool(s.get(f"tp{i}_hit")) for i in (1, 2, 3))
+        for s in eligible
+    )
+    losses = sum(
+        s.get("status") == "STOP_LOSS"
+        and not any(bool(s.get(f"tp{i}_hit")) for i in (1, 2, 3))
+        for s in eligible
+    )
     win_rate = wins / len(eligible) * 100 if eligible else 0
     total_r = sum(float(s.get("realised_r", 0) or 0) for s in signals
                   if s.get("status") not in {"MANUALLY_STOPPED", "INVALIDATED", "AMBIGUOUS"})
@@ -731,10 +743,10 @@ def _performance_summary(signals):
         f"Generated/tracked: {len(signals)}\n"
         f"Completed: {len(completed)}\n"
         f"Wins: {wins}  |  Losses: {losses}\n"
-        f"Win rate (TP3 and manual TP1/TP2 closes vs SL): {win_rate:.1f}%\n"
+        f"Win rate (signals reaching any TP milestone vs pre-target SL): {win_rate:.1f}%\n"
         f"TP achievements: TP1 {tp[0]} | TP2 {tp[1]} | TP3 {tp[2]}\n"
         f"Cumulative realised R: {total_r:+.2f}R\n\n"
-        "Manual closes after TP1/TP2 count as milestone wins. Stops before TP1, invalidated "
+        "TP1/TP2/TP3 achievements count as signal wins; post-target stop-outs are partial wins. Stops before TP1, invalidated "
         "and ambiguous signals are excluded. This is signal analytics, not broker P/L."
     )
 

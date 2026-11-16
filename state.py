@@ -41,6 +41,7 @@ def _empty_state():
         "active_trades": {},
         "next_trade_id": 1,
         "signals": {},
+        "system_signal_keys": {},
         "signal_events": [],
         "next_signal_id": 1,
         "scanner_state": {},
@@ -412,6 +413,74 @@ def add_signal(user_id, signal):
         return dict(record)
 
 
+
+def add_system_signal(key, signal):
+    """Register each qualifying scanner signal once for platform-wide monitoring."""
+    with _lock:
+        key = str(key)
+        existing_id = _state["system_signal_keys"].get(key)
+        if existing_id:
+            existing = _state["signals"].get(str(existing_id))
+            if existing:
+                return dict(existing)
+
+        signal_id = str(_state["next_signal_id"])
+        _state["next_signal_id"] += 1
+        record = dict(signal)
+        record.update({
+            "id": signal_id,
+            "user_id": "__system__",
+            "system_managed": True,
+            "system_key": key,
+            "status": "TRACKING",
+            "created_at": _now(),
+            "updated_at": _now(),
+            "completed_at": None,
+            "events": [],
+        })
+        _state["signals"][signal_id] = record
+        _state["system_signal_keys"][key] = signal_id
+        _add_signal_event_locked(
+            signal_id,
+            "SYSTEM_SIGNAL_CREATED",
+            "Qualifying scanner signal added to platform-wide performance monitoring.",
+        )
+        _save()
+        return dict(record)
+
+
+def get_system_tracked_signals():
+    """Return active scanner-generated records, never personal tracked signals."""
+    with _lock:
+        records = [
+            dict(signal)
+            for signal in _state["signals"].values()
+            if signal.get("system_managed")
+            and signal.get("status") == "TRACKING"
+        ]
+        return sorted(
+            records,
+            key=lambda item: item.get("created_at", ""),
+            reverse=True,
+        )
+
+
+def get_system_signal_history(limit=500):
+    """Return platform-wide scanner outcomes for aggregate performance reporting."""
+    with _lock:
+        records = [
+            dict(signal)
+            for signal in _state["signals"].values()
+            if signal.get("system_managed")
+        ]
+        records.sort(
+            key=lambda item: item.get("created_at", ""),
+            reverse=True,
+        )
+        return records[:max(1, int(limit))]
+
+
+
 def get_signal(signal_id, user_id=None):
     with _lock:
         signal = _state["signals"].get(str(signal_id))
@@ -541,6 +610,7 @@ def complete_signal(signal_id, result, message="Signal completed."):
     allowed_results = {
         "TP3",
         "STOP_LOSS",
+        "PARTIAL_WIN",
         "INVALIDATED",
         "MANUALLY_STOPPED",
         "AMBIGUOUS",
@@ -555,13 +625,22 @@ def complete_signal(signal_id, result, message="Signal completed."):
         if not signal or signal.get("status") != "TRACKING":
             return False
 
-        signal["status"] = result
+        # A TP1/TP2 milestone remains a signal-level win even if the
+        # remaining position later reaches its stop. Realised R is kept
+        # separately and may be negative or positive.
+        final_result = result
+        if result == "STOP_LOSS" and (
+            signal.get("tp1_hit") or signal.get("tp2_hit") or signal.get("tp3_hit")
+        ):
+            final_result = "PARTIAL_WIN"
+
+        signal["status"] = final_result
         signal["completed_at"] = _now()
         signal["updated_at"] = _now()
 
         _add_signal_event_locked(
             signal_id,
-            result,
+            final_result,
             message,
         )
 
