@@ -181,7 +181,7 @@ async def _check_one_signal(app, user_id, signal, candle, candle_time):
     if candle_high is None or candle_low is None or candle_close is None:
         return
 
-    settings = state.get_user_settings(user_id) or {}
+    settings = {} if str(user_id) == "__system__" else (state.get_user_settings(user_id) or {})
     flags = [
         bool(signal.get("tp1_hit")),
         bool(signal.get("tp2_hit")),
@@ -819,6 +819,15 @@ async def _monitor_cycle(app):
 
             key = (symbol, timeframe)
             grouped.setdefault(key, []).append((user_id, signal))
+
+    # Scanner-generated signals are monitored once for platform-wide statistics.
+    # They are not inserted into any user's personal My Tracked Signals list.
+    for signal in state.get_system_tracked_signals():
+        symbol = signal.get("symbol")
+        timeframe = str(signal.get("timeframe") or "15m")
+        signal_id = _signal_id(signal)
+        if symbol in MARKETS and signal_id is not None:
+            grouped.setdefault((symbol, timeframe), []).append(("__system__", signal))
 
     for (symbol, timeframe), records in grouped.items():
         try:
