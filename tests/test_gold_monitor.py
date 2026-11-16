@@ -10,6 +10,7 @@ from gold_monitor import (
     _gold_monitor_cycle,
     GOLD_FETCH_SCHEDULE,
     GOLD_SOURCE_OUTPUTSIZE,
+    GOLD_TIMEFRAMES,
     _breakout_retest,
     _recent_trendline_breakout,
     _trendline_breakout,
@@ -220,19 +221,17 @@ class GoldStructureDetectionTests(unittest.TestCase):
 
 
 class GoldApiScheduleTests(unittest.TestCase):
-    def test_seven_timeframes_are_covered_by_shared_feed_and_due_fetches(self):
-        self.assertEqual(
-            set(GOLD_FETCH_SCHEDULE),
-            {"m1_source", "30m", "1h", "4h", "1day"},
-        )
-        self.assertEqual(GOLD_SOURCE_OUTPUTSIZE, 2000)
+    def test_only_five_and_fifteen_minute_timeframes_are_monitored(self):
+        self.assertEqual(GOLD_TIMEFRAMES, ("5m", "15m"))
+        self.assertEqual(set(GOLD_FETCH_SCHEDULE), {"m5_source"})
+        self.assertEqual(GOLD_SOURCE_OUTPUTSIZE, 500)
 
     def test_dedicated_gold_monitor_fits_its_protected_half_budget(self):
-        self.assertEqual(estimated_daily_gold_monitor_requests(), 259)
+        self.assertEqual(estimated_daily_gold_monitor_requests(), 288)
         self.assertLessEqual(estimated_daily_gold_monitor_requests(), 350)
 
     def test_total_gold_usage_includes_scanner_but_scanner_is_other_pool(self):
-        self.assertEqual(estimated_daily_gold_requests(), 307)
+        self.assertEqual(estimated_daily_gold_requests(), 336)
 
     def test_weekend_cycle_makes_no_gold_api_request(self):
         class App:
@@ -246,14 +245,14 @@ class GoldApiScheduleTests(unittest.TestCase):
             asyncio.run(_gold_monitor_cycle(App(), now_epoch=saturday))
         fetch.assert_not_awaited()
 
-    def test_single_m1_feed_can_be_resampled_for_m5_and_m15(self):
+    def test_single_m5_feed_can_be_resampled_for_m15(self):
         from market_data import resample_candles
 
-        now = pd.Timestamp.now(tz="UTC").floor("min")
+        now = pd.Timestamp.now(tz="UTC").floor("5min")
         index = pd.date_range(
-            end=now - pd.Timedelta(minutes=1),
+            end=now - pd.Timedelta(minutes=5),
             periods=GOLD_SOURCE_OUTPUTSIZE,
-            freq="min",
+            freq="5min",
         )
         close = np.linspace(2000.0, 2010.0, len(index))
         source = pd.DataFrame(
@@ -265,10 +264,9 @@ class GoldApiScheduleTests(unittest.TestCase):
             },
             index=index,
         )
-        five_minute = resample_candles(source, "5m")
         fifteen_minute = resample_candles(source, "15m")
-        self.assertGreaterEqual(len(five_minute), 300)
-        self.assertGreaterEqual(len(fifteen_minute), 100)
+        self.assertGreaterEqual(len(source), 80)
+        self.assertGreaterEqual(len(fifteen_minute), 80)
 
 
 if __name__ == "__main__":
