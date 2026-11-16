@@ -23,15 +23,13 @@ logger = logging.getLogger(__name__)
 
 GOLD = "XAU/USD"
 GOLD_MONITOR_LOOP_SECONDS = 60
-GOLD_SOURCE_INTERVAL_SECONDS = 8 * 60
-GOLD_SOURCE_OUTPUTSIZE = 2000
-GOLD_TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h", "4h", "1day")
+GOLD_SOURCE_INTERVAL_SECONDS = 5 * 60
+GOLD_SOURCE_OUTPUTSIZE = 500
+# Only 5m and 15m receive dedicated Gold condition analysis.
+# The 5m feed is also resampled to build completed 15m candles.
+GOLD_TIMEFRAMES = ("5m", "15m")
 GOLD_FETCH_SCHEDULE = {
-    "m1_source": GOLD_SOURCE_INTERVAL_SECONDS,
-    "30m": 30 * 60,
-    "1h": 60 * 60,
-    "4h": 4 * 60 * 60,
-    "1day": 24 * 60 * 60,
+    "m5_source": GOLD_SOURCE_INTERVAL_SECONDS,
 }
 GOLD_AUTOMATIC_SCAN_INTERVAL_SECONDS = 30 * 60
 
@@ -457,7 +455,7 @@ async def _fetch_gold_frame(timeframe, interval, outputsize=1500):
 
 
 async def _gold_monitor_cycle(app, now_epoch=None):
-    """Fetch only due Gold timeframes and share the M1 feed across M1/M5/M15."""
+    """Fetch Gold 5m candles and derive 15m analysis from the same feed."""
     if GOLD not in MARKETS:
         return
     now_epoch = time.time() if now_epoch is None else float(now_epoch)
@@ -470,47 +468,31 @@ async def _gold_monitor_cycle(app, now_epoch=None):
     ):
         return
 
-    source_retry_key = "gold_monitor:retry_after:m1_source"
+    source_retry_key = "gold_monitor:retry_after:m5_source"
     source_retry_after = float(state.get_scanner_state(source_retry_key, 0) or 0)
-    source_due, source_slot = _slot_due("m1_source", GOLD_FETCH_SCHEDULE["m1_source"], now_epoch)
-    if source_due and now_epoch >= source_retry_after:
-        try:
-            source = await _fetch_gold_frame("1m", "1m", GOLD_SOURCE_OUTPUTSIZE)
-            _mark_slot("m1_source", source_slot)
-            state.set_scanner_state(source_retry_key, 0)
-            for timeframe in ("1m", "5m", "15m"):
-                frame = resample_candles(source, timeframe)
-                if len(frame) >= 80:
-                    await _analyse_and_notify(app, timeframe, frame)
-                else:
-                    logger.warning(
-                        "Gold %s history is too short after resampling (%d candles).",
-                        timeframe, len(frame),
-                    )
-        except (MarketDataError, ValueError) as exc:
-            logger.warning("Gold M1/M5/M15 monitoring delayed: %s", exc)
-            state.set_scanner_state(
-                source_retry_key,
-                now_epoch + GOLD_FETCH_SCHEDULE["m1_source"],
-            )
+    source_due, source_slot = _slot_due("m5_source", GOLD_FETCH_SCHEDULE["m5_source"], now_epoch)
+    if not source_due or now_epoch < source_retry_after:
+        return
 
-    for timeframe, interval in (("30m", "30m"), ("1h", "1h"), ("4h", "4h"), ("1day", "1day")):
-        retry_key = f"gold_monitor:retry_after:{timeframe}"
-        retry_after = float(state.get_scanner_state(retry_key, 0) or 0)
-        due, slot = _slot_due(timeframe, GOLD_FETCH_SCHEDULE[timeframe], now_epoch)
-        if not due or now_epoch < retry_after:
-            continue
-        try:
-            frame = await _fetch_gold_frame(timeframe, interval, 1500)
-            _mark_slot(timeframe, slot)
-            state.set_scanner_state(retry_key, 0)
-            await _analyse_and_notify(app, timeframe, frame)
-        except (MarketDataError, ValueError) as exc:
-            logger.warning("Gold %s monitoring delayed: %s", timeframe, exc)
-            state.set_scanner_state(
-                retry_key,
-                now_epoch + GOLD_FETCH_SCHEDULE[timeframe],
-            )
+    try:
+        source = await _fetch_gold_frame("5m", "5m", GOLD_SOURCE_OUTPUTSIZE)
+        _mark_slot("m5_source", source_slot)
+        state.set_scanner_state(source_retry_key, 0)
+        for timeframe in GOLD_TIMEFRAMES:
+            frame = source if timeframe == "5m" else resample_candles(source, timeframe)
+            if len(frame) >= 80:
+                await _analyse_and_notify(app, timeframe, frame)
+            else:
+                logger.warning(
+                    "Gold %s history is too short (%d candles).",
+                    timeframe, len(frame),
+                )
+    except (MarketDataError, ValueError) as exc:
+        logger.warning("Gold 5m/15m monitoring delayed: %s", exc)
+        state.set_scanner_state(
+            source_retry_key,
+            now_epoch + GOLD_FETCH_SCHEDULE["m5_source"],
+        )
 
 
 async def gold_market_monitor_loop(app):
