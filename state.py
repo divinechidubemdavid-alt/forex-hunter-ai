@@ -610,6 +610,7 @@ def complete_signal(signal_id, result, message="Signal completed."):
     allowed_results = {
         "TP3",
         "STOP_LOSS",
+        "PARTIAL_WIN",
         "INVALIDATED",
         "MANUALLY_STOPPED",
         "AMBIGUOUS",
@@ -624,13 +625,22 @@ def complete_signal(signal_id, result, message="Signal completed."):
         if not signal or signal.get("status") != "TRACKING":
             return False
 
-        signal["status"] = result
+        # A TP1/TP2 milestone remains a signal-level win even if the
+        # remaining position later reaches its stop. Realised R is kept
+        # separately and may be negative or positive.
+        final_result = result
+        if result == "STOP_LOSS" and (
+            signal.get("tp1_hit") or signal.get("tp2_hit") or signal.get("tp3_hit")
+        ):
+            final_result = "PARTIAL_WIN"
+
+        signal["status"] = final_result
         signal["completed_at"] = _now()
         signal["updated_at"] = _now()
 
         _add_signal_event_locked(
             signal_id,
-            result,
+            final_result,
             message,
         )
 
