@@ -176,6 +176,9 @@ async def _send_signal(app, symbol, result):
     }
     opportunity_key = _signal_key(symbol, result)
     opportunity = state.add_opportunity(opportunity_key, signal_record)
+    # Platform-wide monitoring is separate from per-user opt-in tracking.
+    # This creates one shared performance record per unique scanner signal.
+    state.add_system_signal(opportunity_key, signal_record)
 
     chart = None
     try:
