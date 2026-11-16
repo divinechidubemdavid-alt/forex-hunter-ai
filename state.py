@@ -41,6 +41,7 @@ def _empty_state():
         "active_trades": {},
         "next_trade_id": 1,
         "signals": {},
+        "system_signal_keys": {},
         "signal_events": [],
         "next_signal_id": 1,
         "scanner_state": {},
@@ -410,6 +411,74 @@ def add_signal(user_id, signal):
 
         _save()
         return dict(record)
+
+
+
+def add_system_signal(key, signal):
+    """Register each qualifying scanner signal once for platform-wide monitoring."""
+    with _lock:
+        key = str(key)
+        existing_id = _state["system_signal_keys"].get(key)
+        if existing_id:
+            existing = _state["signals"].get(str(existing_id))
+            if existing:
+                return dict(existing)
+
+        signal_id = str(_state["next_signal_id"])
+        _state["next_signal_id"] += 1
+        record = dict(signal)
+        record.update({
+            "id": signal_id,
+            "user_id": "__system__",
+            "system_managed": True,
+            "system_key": key,
+            "status": "TRACKING",
+            "created_at": _now(),
+            "updated_at": _now(),
+            "completed_at": None,
+            "events": [],
+        })
+        _state["signals"][signal_id] = record
+        _state["system_signal_keys"][key] = signal_id
+        _add_signal_event_locked(
+            signal_id,
+            "SYSTEM_SIGNAL_CREATED",
+            "Qualifying scanner signal added to platform-wide performance monitoring.",
+        )
+        _save()
+        return dict(record)
+
+
+def get_system_tracked_signals():
+    """Return active scanner-generated records, never personal tracked signals."""
+    with _lock:
+        records = [
+            dict(signal)
+            for signal in _state["signals"].values()
+            if signal.get("system_managed")
+            and signal.get("status") == "TRACKING"
+        ]
+        return sorted(
+            records,
+            key=lambda item: item.get("created_at", ""),
+            reverse=True,
+        )
+
+
+def get_system_signal_history(limit=500):
+    """Return platform-wide scanner outcomes for aggregate performance reporting."""
+    with _lock:
+        records = [
+            dict(signal)
+            for signal in _state["signals"].values()
+            if signal.get("system_managed")
+        ]
+        records.sort(
+            key=lambda item: item.get("created_at", ""),
+            reverse=True,
+        )
+        return records[:max(1, int(limit))]
+
 
 
 def get_signal(signal_id, user_id=None):
