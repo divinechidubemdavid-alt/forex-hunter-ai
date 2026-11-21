@@ -233,17 +233,41 @@ class GoldApiScheduleTests(unittest.TestCase):
     def test_total_gold_usage_includes_scanner_but_scanner_is_other_pool(self):
         self.assertEqual(estimated_daily_gold_requests(), 384)
 
-    def test_weekend_cycle_makes_no_gold_api_request(self):
+    def test_weekend_cycle_uses_bitcoin_for_special_monitoring(self):
         class App:
             pass
 
         saturday = datetime(
             2026, 11, 14, 12, 0, tzinfo=ZoneInfo("Africa/Lagos")
         ).timestamp()
-        with patch("gold_monitor.fetch_candles", new_callable=AsyncMock) as fetch:
+        source = _candles("up", count=500)
+        with (
+            patch("gold_monitor._slot_due", return_value=(True, 123)),
+            patch("gold_monitor._fetch_gold_frame", new_callable=AsyncMock, return_value=source) as fetch,
+            patch("gold_monitor.resample_candles", return_value=source),
+            patch("gold_monitor._analyse_and_notify", new_callable=AsyncMock),
+        ):
             import asyncio
             asyncio.run(_gold_monitor_cycle(App(), now_epoch=saturday))
-        fetch.assert_not_awaited()
+        self.assertEqual(fetch.await_args.args[0], "BTC/USD")
+
+    def test_weekday_cycle_uses_gold_for_special_monitoring(self):
+        class App:
+            pass
+
+        tuesday = datetime(
+            2026, 11, 17, 12, 0, tzinfo=ZoneInfo("Africa/Lagos")
+        ).timestamp()
+        source = _candles("up", count=500)
+        with (
+            patch("gold_monitor._slot_due", return_value=(True, 123)),
+            patch("gold_monitor._fetch_gold_frame", new_callable=AsyncMock, return_value=source) as fetch,
+            patch("gold_monitor.resample_candles", return_value=source),
+            patch("gold_monitor._analyse_and_notify", new_callable=AsyncMock),
+        ):
+            import asyncio
+            asyncio.run(_gold_monitor_cycle(App(), now_epoch=tuesday))
+        self.assertEqual(fetch.await_args.args[0], "XAU/USD")
 
     def test_single_m5_feed_can_be_resampled_for_m15(self):
         from market_data import resample_candles
