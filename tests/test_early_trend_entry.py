@@ -102,7 +102,7 @@ class EarlyTrendEntryTests(unittest.TestCase):
         self.assertEqual(result["direction"], "BUY")
         self.assertEqual(result["entry"], 100.1)
         self.assertEqual(result["stop_loss"], 99.0)
-        self.assertNotIn("take_profits", result)
+        self.assertEqual(result["take_profits"], [])
 
     def test_legacy_ema_strategy_keeps_its_adx_requirement(self):
         frame = _indicator_frame()
