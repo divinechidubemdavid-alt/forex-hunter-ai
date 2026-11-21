@@ -882,6 +882,7 @@ def analyze(frame, timeframe="15m", trading_style=None):
         watch = _early_watch_setup(data)
         if watch:
             result["signal_stage"] = "EARLY_WATCH"
+            result["direction"] = watch[0]
             result["reason"] = watch[1]
         else:
             result["reason"] = (
@@ -969,7 +970,17 @@ def analyze(frame, timeframe="15m", trading_style=None):
 
     if score < style_minimum_score(trading_style):
         if primary_strategy == "EARLY_TREND_ENTRY":
-            result["signal_stage"] = "EARLY_WATCH"
+            result["direction"] = direction
+            provisional_stop = _technical_stop(data, direction, entry, atr)
+            if score >= 70 and provisional_stop is not None and abs(entry - provisional_stop) > 0:
+                result.update({
+                    "signal_stage": "EARLY_ENTRY_CANDIDATE",
+                    "entry": entry,
+                    "stop_loss": provisional_stop,
+                    "invalidation_rule": "Provisional only: invalidate if a completed 5m candle closes beyond the structural stop area. Wait for full 80/100 qualification before treating this as a confirmed signal.",
+                })
+            else:
+                result["signal_stage"] = "EARLY_WATCH"
         result["score"] = score
         result["score_label"] = (
             "Weak" if score < 50
