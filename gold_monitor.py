@@ -16,12 +16,15 @@ import pandas as pd
 import state
 from config import MARKETS, TELEGRAM_CHANNEL_ID, GOLD_BUDGET_SHARE
 from market_data import fetch_candles, resample_candles, MarketDataError
-from strategy import calculate_indicators
+from strategy import calculate_indicators, analyze
 from chart import create_market_chart
 
 logger = logging.getLogger(__name__)
 
 GOLD = "XAU/USD"
+BITCOIN = "BTC/USD"
+SPECIAL_BASE_INTERVAL_SECONDS = 5 * 60
+SPECIAL_ACTIVE_INTERVAL_SECONDS = 3 * 60
 GOLD_MONITOR_LOOP_SECONDS = 60
 GOLD_SOURCE_INTERVAL_SECONDS = 5 * 60
 GOLD_SOURCE_OUTPUTSIZE = 500
@@ -189,7 +192,7 @@ def _safe_float(value, default=None):
         return default
 
 
-def classify_gold_market(frame, timeframe, previous_state=None):
+def classify_gold_market(frame, timeframe, previous_state=None, symbol=GOLD):
     """Classify a completed-candle Gold frame and describe actionable structure."""
     if frame is None or frame.empty:
         raise ValueError("Gold monitor received an empty candle frame.")
@@ -326,7 +329,7 @@ def classify_gold_market(frame, timeframe, previous_state=None):
                 detail = "Price is near EMA21 and trend strength is limited; wait for a clearer direction."
 
     return {
-        "symbol": GOLD,
+        "symbol": symbol,
         "timeframe": timeframe,
         "condition": condition,
         "direction": direction,
@@ -342,12 +345,12 @@ def classify_gold_market(frame, timeframe, previous_state=None):
 
 
 def _notification_text(result, initial=False):
-    heading = "GOLD MULTI-TIMEFRAME UPDATE"
+    heading = f"{result['symbol']} MULTI-TIMEFRAME UPDATE"
     if initial:
-        heading = "GOLD MONITORING — INITIAL TIMEFRAME STATUS"
+        heading = f"{result['symbol']} MONITORING — INITIAL TIMEFRAME STATUS"
     return (
         f"🟡 {heading}\n\n"
-        f"Market: XAU/USD (Gold)\n"
+        f"Market: {result['symbol']}\n"
         f"Timeframe: {result['timeframe'].upper()}\n"
         f"Condition: {result['condition']}\n"
         f"Direction: {result['direction']}\n"
@@ -365,7 +368,7 @@ async def _send_gold_update(app, result, initial=False):
     try:
         chart = create_market_chart(
             result["candles"],
-            GOLD,
+            result["symbol"],
             result["timeframe"],
             strategy="GOLD MARKET MONITOR",
             signal_stage=result["condition"],
@@ -406,12 +409,57 @@ async def _send_gold_update(app, result, initial=False):
             logger.exception("Could not publish Gold update to channel.")
 
 
-async def _analyse_and_notify(app, timeframe, frame):
-    key = f"gold_monitor:condition:{timeframe}"
+
+async def _send_early_alert(app, symbol, result):
+    """Send a provisional WATCH/candidate alert without creating a trade."""
+    stage = result.get("signal_stage")
+    direction = result.get("direction") or result.get("status") or "UNCONFIRMED"
+    title = "EARLY ENTRY CANDIDATE — PROVISIONAL" if stage == "EARLY_ENTRY_CANDIDATE" else "DEVELOPING TREND — WATCH"
+    candles = result.get("candles")
+    latest_price = result.get("entry")
+    if latest_price is None and candles is not None and len(candles):
+        latest_price = candles.iloc[-1]["close"]
+    lines = [f"🟡 {title}", "", f"Market: {symbol}", f"Timeframe: {result.get('timeframe', '5m')}", f"Direction being watched: {direction}", f"Setup score: {float(result.get('score', 0) or 0):.0f}/100"]
+    if latest_price is not None:
+        lines.append(f"Price: {float(latest_price):g}")
+    if result.get("stop_loss") is not None:
+        lines.append(f"Provisional structural invalidation: {float(result['stop_loss']):g}")
+    lines.extend(["", str(result.get("reason") or "Early momentum is developing; wait for confirmation."), "", "⚠️ PROVISIONAL ONLY — not a confirmed BUY/SELL signal. Do not treat this as an entry instruction. The confirmed scanner still requires at least 80/100 and completed-candle confirmation."])
+    caption = "\n".join(lines)
+    chart = None
+    try:
+        chart = create_market_chart(candles, symbol, result.get("timeframe", "5m"), strategy="EARLY TREND DISCOVERY", signal_stage=stage)
+    except Exception:
+        logger.exception("Could not create %s early-discovery chart.", symbol)
+    candle_time = str(result.get("candle_time") or "unknown")
+    delivery_key = f"early-discovery:{symbol}:{stage}:{direction}:{candle_time}"
+    for user_id in state.get_users():
+        target_key = f"{delivery_key}:user:{user_id}"
+        if state.get_last_alert(target_key):
+            continue
+        try:
+            if not state.user_monitoring_enabled(user_id):
+                continue
+            settings = state.get_user_settings(user_id) or {}
+            notifications = settings.get("notifications") or {}
+            if notifications.get("gold_updates", True) is False:
+                continue
+            if chart is not None:
+                chart.seek(0)
+                await app.bot.send_photo(chat_id=int(user_id), photo=chart, caption=caption)
+            else:
+                await app.bot.send_message(chat_id=int(user_id), text=caption)
+            state.set_last_alert(target_key, "sent")
+        except Exception:
+            logger.exception("Could not send provisional alert to user %s.", user_id)
+
+
+async def _analyse_and_notify(app, timeframe, frame, symbol=GOLD):
+    key = f"special_monitor:{symbol}:condition:{timeframe}"
     previous = state.get_scanner_state(key, {})
     if not isinstance(previous, dict):
         previous = {}
-    result = classify_gold_market(frame, timeframe, previous)
+    result = classify_gold_market(frame, timeframe, previous, symbol=symbol)
     condition_changed = previous.get("condition") != result["condition"]
     first_snapshot = not previous
     new_candle = previous.get("candle_time") != result["candle_time"]
@@ -430,15 +478,25 @@ async def _analyse_and_notify(app, timeframe, frame):
     if first_snapshot or (condition_changed and new_candle):
         await _send_gold_update(app, result, initial=first_snapshot)
 
+    # Publish provisional discovery stages only; confirmed BUY/SELL alerts
+    # remain the responsibility of the main scanner.
+    if timeframe == "5m" and new_candle:
+        try:
+            early = analyze(frame, timeframe, trading_style="SCALPING")
+            if early.get("signal_stage") in {"EARLY_WATCH", "EARLY_ENTRY_CANDIDATE"}:
+                await _send_early_alert(app, symbol, early)
+        except Exception:
+            logger.exception("Could not evaluate provisional %s early alert.", symbol)
 
-async def _fetch_gold_frame(timeframe, interval, outputsize=1500):
+
+async def _fetch_gold_frame(symbol, timeframe, interval, outputsize=1500):
     # The shared eight-second cooldown applies across every Twelve Data
     # consumer. Wait for it rather than turning a temporary cooldown into
     # a missed Gold timeframe.
     for attempt in range(6):
         try:
             return await fetch_candles(
-                MARKETS[GOLD],
+                MARKETS[symbol],
                 outputsize=outputsize,
                 interval=interval,
                 purpose="gold_monitor",
@@ -455,51 +513,52 @@ async def _fetch_gold_frame(timeframe, interval, outputsize=1500):
 
 
 async def _gold_monitor_cycle(app, now_epoch=None):
-    """Fetch Gold 5m candles and derive 15m analysis from the same feed."""
-    if GOLD not in MARKETS:
-        return
+    """Run 5m discovery: Gold on weekdays and Bitcoin on weekends."""
     now_epoch = time.time() if now_epoch is None else float(now_epoch)
-    # Gold is a weekday market only. Use Nigeria local market-session time.
-    local_now = datetime.fromtimestamp(
-        now_epoch, tz=ZoneInfo("Africa/Lagos")
-    )
-    if local_now.weekday() >= 5 or (
-        local_now.weekday() == 4 and local_now.hour >= 22
-    ):
+    local_now = datetime.fromtimestamp(now_epoch, tz=ZoneInfo("Africa/Lagos"))
+    symbol = BITCOIN if local_now.weekday() >= 5 else GOLD
+    if symbol not in MARKETS:
         return
 
-    source_retry_key = "gold_monitor:retry_after:m5_source"
+    previous_condition = state.get_scanner_state(f"special_monitor:{symbol}:condition:5m", {})
+    promising = isinstance(previous_condition, dict) and any(
+        token in str(previous_condition.get("condition", ""))
+        for token in ("TRENDLINE BREAKOUT", "PULLBACK CONTINUATION", "UPTREND", "DOWNTREND")
+    )
+    interval_seconds = SPECIAL_ACTIVE_INTERVAL_SECONDS if promising else SPECIAL_BASE_INTERVAL_SECONDS
+    source_retry_key = f"special_monitor:{symbol}:retry_after:m5_source"
     source_retry_after = float(state.get_scanner_state(source_retry_key, 0) or 0)
-    source_due, source_slot = _slot_due("m5_source", GOLD_FETCH_SCHEDULE["m5_source"], now_epoch)
+    slot_key = f"{symbol}:m5_source:{interval_seconds}"
+    source_due, source_slot = _slot_due(slot_key, interval_seconds, now_epoch)
     if not source_due or now_epoch < source_retry_after:
         return
 
     try:
-        source = await _fetch_gold_frame("5m", "5m", GOLD_SOURCE_OUTPUTSIZE)
-        _mark_slot("m5_source", source_slot)
+        source = await _fetch_gold_frame(symbol, "5m", "5m", GOLD_SOURCE_OUTPUTSIZE)
+        _mark_slot(slot_key, source_slot)
         state.set_scanner_state(source_retry_key, 0)
         for timeframe in GOLD_TIMEFRAMES:
             frame = source if timeframe == "5m" else resample_candles(source, timeframe)
             if len(frame) >= 80:
-                await _analyse_and_notify(app, timeframe, frame)
+                await _analyse_and_notify(app, timeframe, frame, symbol=symbol)
             else:
                 logger.warning(
                     "Gold %s history is too short (%d candles).",
                     timeframe, len(frame),
                 )
     except (MarketDataError, ValueError) as exc:
-        logger.warning("Gold 5m/15m monitoring delayed: %s", exc)
+        logger.warning("%s 5m/15m monitoring delayed: %s", symbol, exc)
         state.set_scanner_state(
             source_retry_key,
-            now_epoch + GOLD_FETCH_SCHEDULE["m5_source"],
+            now_epoch + interval_seconds,
         )
 
 
 async def gold_market_monitor_loop(app):
     """Run the dedicated Gold-first condition monitor without extra strategies or orders."""
     logger.info(
-        "Gold multi-timeframe monitor started. Timeframes: %s. "
-        "Gold receives %.0f%% of the background API budget.",
+        "Special 5m discovery monitor started. Timeframes: %s. "
+        "Dedicated monitoring uses %.0f%% of the background API pool.",
         ", ".join(GOLD_TIMEFRAMES),
         GOLD_BUDGET_SHARE * 100,
     )
@@ -509,5 +568,5 @@ async def gold_market_monitor_loop(app):
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Gold multi-timeframe monitor cycle failed.")
+            logger.exception("Special market monitor cycle failed.")
         await asyncio.sleep(GOLD_MONITOR_LOOP_SECONDS)
