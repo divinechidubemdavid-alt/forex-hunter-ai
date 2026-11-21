@@ -33,7 +33,7 @@ if DEFAULT_TIMEFRAME not in TIMEFRAMES:
 # Automatic scanner settings.
 AUTO_SCAN_TIMEFRAME = "15m"
 HIGHER_TIMEFRAME = "1h"
-AUTO_SCAN_MIN_SCORE = 70
+AUTO_SCAN_MIN_SCORE = 80
 
 # Signal quality bands.
 SCORE_WEAK_MAX = 49
