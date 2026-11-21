@@ -3,9 +3,10 @@ from unittest.mock import patch
 
 import config
 import state
-from auto_scanner import _eligible_markets
+from auto_scanner import _eligible_markets, _markets_for_cycle
 from bot import _active_market_tracked_signals
 from market_scope import get_session_markets, is_market_allowed
+from trading_styles import style_minimum_score
 from zoneinfo import ZoneInfo
 from datetime import datetime
 
