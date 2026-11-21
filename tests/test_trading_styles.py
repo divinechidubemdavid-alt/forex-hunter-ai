@@ -77,9 +77,9 @@ class TradingStylePolicyTests(unittest.TestCase):
         self.assertEqual((scalp, day, swing), (65, 55, 55))
 
     def test_style_specific_qualification_thresholds(self):
-        self.assertEqual(style_minimum_score("SCALPING"), 72)
-        self.assertEqual(style_minimum_score("DAY"), 70)
-        self.assertEqual(style_minimum_score("SWING"), 75)
+        self.assertEqual(style_minimum_score("SCALPING"), 80)
+        self.assertEqual(style_minimum_score("DAY"), 80)
+        self.assertEqual(style_minimum_score("SWING"), 80)
         self.assertEqual(style_minimum_adx("SCALPING"), 15.0)
         self.assertEqual(style_minimum_adx("DAY"), 20.0)
         self.assertEqual(style_minimum_adx("SWING"), 22.0)
