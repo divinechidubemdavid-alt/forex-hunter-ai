@@ -15,7 +15,7 @@ STYLE_CONFIGS = {
         },
         "has_trade_levels": False,
         "score_weights": {"adx": 10, "ema": 10, "rsi": 20, "candle": 20, "setup": 15, "volatility": 10, "directional": 15},
-        "minimum_score": 72,
+        "minimum_score": 80,
         "minimum_adx": 15.0,
     },
     "DAY": {
@@ -27,7 +27,7 @@ STYLE_CONFIGS = {
         },
         "has_trade_levels": True,
         "score_weights": {"adx": 20, "ema": 15, "rsi": 10, "candle": 10, "setup": 20, "volatility": 10, "directional": 15},
-        "minimum_score": 70,
+        "minimum_score": 80,
         "minimum_adx": 20.0,
     },
     "SWING": {
@@ -40,7 +40,7 @@ STYLE_CONFIGS = {
         },
         "has_trade_levels": True,
         "score_weights": {"adx": 25, "ema": 20, "rsi": 10, "candle": 10, "setup": 15, "volatility": 5, "directional": 15},
-        "minimum_score": 75,
+        "minimum_score": 80,
         "minimum_adx": 22.0,
     },
 }
