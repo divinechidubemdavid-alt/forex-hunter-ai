@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import state
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from config import MARKETS, TELEGRAM_CHANNEL_ID, FOREX_MARKETS
+from config import MARKETS, TELEGRAM_CHANNEL_ID, AUTO_SCAN_MIN_SCORE
 from market_scope import get_session_markets
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
@@ -20,7 +20,7 @@ WAT = ZoneInfo("Africa/Lagos")
 
 SCAN_TIMEFRAME = "15m"
 SCAN_INTERVAL_SECONDS = 60
-MINIMUM_SCAN_INTERVAL_MINUTES = 30
+MINIMUM_SCAN_INTERVAL_MINUTES = 15
 
 GOLD = "XAU/USD"
 BITCOIN = "BTC/USD"
@@ -97,24 +97,12 @@ def _markets_for_cycle(now):
     if not eligible:
         return []
 
-    forex_order = list(FOREX_MARKETS)
-    position = int(
-        state.get_scanner_state("market_rotation_position", 0)
-    )
-    if forex_order:
-        offset = position % len(forex_order)
-        forex_order = forex_order[offset:] + forex_order[:offset]
-        state.set_scanner_state(
-            "market_rotation_position",
-            position + 1,
-        )
-
-    ordered = []
-    if GOLD in eligible:
-        ordered.append(GOLD)
-    ordered.extend(market for market in forex_order if market in eligible)
-    if BITCOIN in eligible:
-        ordered.append(BITCOIN)
+    # Rotate the first market on every cycle so weekday markets receive
+    # equal scanning priority instead of always putting Gold first.
+    position = int(state.get_scanner_state("market_rotation_position", 0))
+    offset = position % len(eligible)
+    ordered = eligible[offset:] + eligible[:offset]
+    state.set_scanner_state("market_rotation_position", position + 1)
     return ordered
 
 
@@ -319,7 +307,7 @@ async def _scan_market(app, symbol):
 
         score = float(result.get("score", 0))
 
-        if score < 70:
+        if score < AUTO_SCAN_MIN_SCORE:
             logger.info(
                 "Signal for %s did not reach the alert threshold.",
                 symbol,
@@ -382,7 +370,7 @@ async def auto_scan_loop(app):
 
                 if markets:
                     logger.info(
-                        "Starting 30-minute scan cycle for %d markets: %s",
+                        "Starting 15-minute scan cycle for %d markets: %s",
                         len(markets),
                         ", ".join(markets),
                     )
