@@ -1,8 +1,7 @@
-"""Gold-first multi-timeframe market-condition monitoring.
+"""Special market-condition monitoring using completed 5-minute candles only.
 
-The monitor shares one M1 request across M1/M5/M15 by resampling completed
-candles. Higher timeframes are fetched only when their own candle interval
-is due. Updates describe market conditions; they are not trade signals.
+One Twelve Data 5-minute feed is shared for Gold on weekdays and BTC/USD on
+weekends. Updates describe market conditions; they are not trade signals.
 """
 import asyncio
 import logging
@@ -15,7 +14,7 @@ import pandas as pd
 
 import state
 from config import MARKETS, TELEGRAM_CHANNEL_ID, GOLD_BUDGET_SHARE
-from market_data import fetch_candles, resample_candles, MarketDataError
+from market_data import fetch_candles, MarketDataError
 from strategy import calculate_indicators, analyze
 from chart import create_market_chart
 
@@ -28,9 +27,8 @@ SPECIAL_ACTIVE_INTERVAL_SECONDS = 3 * 60
 GOLD_MONITOR_LOOP_SECONDS = 60
 GOLD_SOURCE_INTERVAL_SECONDS = 5 * 60
 GOLD_SOURCE_OUTPUTSIZE = 500
-# Only 5m and 15m receive dedicated Gold condition analysis.
-# The 5m feed is also resampled to build completed 15m candles.
-GOLD_TIMEFRAMES = ("5m", "15m")
+# Special Monitoring analyses one timeframe only for both supported markets.
+GOLD_TIMEFRAMES = ("5m",)
 GOLD_FETCH_SCHEDULE = {
     "m5_source": GOLD_SOURCE_INTERVAL_SECONDS,
 }
@@ -345,9 +343,9 @@ def classify_gold_market(frame, timeframe, previous_state=None, symbol=GOLD):
 
 
 def _notification_text(result, initial=False):
-    heading = f"{result['symbol']} MULTI-TIMEFRAME UPDATE"
+    heading = f"{result['symbol']} SPECIAL MONITORING UPDATE"
     if initial:
-        heading = f"{result['symbol']} MONITORING — INITIAL TIMEFRAME STATUS"
+        heading = f"{result['symbol']} SPECIAL MONITORING — INITIAL STATUS"
     return (
         f"🟡 {heading}\n\n"
         f"Market: {result['symbol']}\n"
@@ -537,17 +535,16 @@ async def _gold_monitor_cycle(app, now_epoch=None):
         source = await _fetch_gold_frame(symbol, "5m", "5m", GOLD_SOURCE_OUTPUTSIZE)
         _mark_slot(slot_key, source_slot)
         state.set_scanner_state(source_retry_key, 0)
-        for timeframe in GOLD_TIMEFRAMES:
-            frame = source if timeframe == "5m" else resample_candles(source, timeframe)
-            if len(frame) >= 80:
-                await _analyse_and_notify(app, timeframe, frame, symbol=symbol)
-            else:
-                logger.warning(
-                    "Gold %s history is too short (%d candles).",
-                    timeframe, len(frame),
-                )
+        timeframe = "5m"
+        if len(source) >= 80:
+            await _analyse_and_notify(app, timeframe, source, symbol=symbol)
+        else:
+            logger.warning(
+                "%s 5m history is too short (%d candles).",
+                symbol, len(source),
+            )
     except (MarketDataError, ValueError) as exc:
-        logger.warning("%s 5m/15m monitoring delayed: %s", symbol, exc)
+        logger.warning("%s 5m special monitoring delayed: %s", symbol, exc)
         state.set_scanner_state(
             source_retry_key,
             now_epoch + interval_seconds,
@@ -557,7 +554,7 @@ async def _gold_monitor_cycle(app, now_epoch=None):
 async def gold_market_monitor_loop(app):
     """Run the dedicated Gold-first condition monitor without extra strategies or orders."""
     logger.info(
-        "Special 5m discovery monitor started. Timeframes: %s. "
+        "Special 5m-only discovery monitor started. Timeframe: %s. "
         "Dedicated monitoring uses %.0f%% of the background API pool.",
         ", ".join(GOLD_TIMEFRAMES),
         GOLD_BUDGET_SHARE * 100,
