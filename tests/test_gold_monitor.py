@@ -221,8 +221,8 @@ class GoldStructureDetectionTests(unittest.TestCase):
 
 
 class GoldApiScheduleTests(unittest.TestCase):
-    def test_only_five_and_fifteen_minute_timeframes_are_monitored(self):
-        self.assertEqual(GOLD_TIMEFRAMES, ("5m", "15m"))
+    def test_special_monitor_uses_only_five_minute_timeframe(self):
+        self.assertEqual(GOLD_TIMEFRAMES, ("5m",))
         self.assertEqual(set(GOLD_FETCH_SCHEDULE), {"m5_source"})
         self.assertEqual(GOLD_SOURCE_OUTPUTSIZE, 500)
 
@@ -244,12 +244,13 @@ class GoldApiScheduleTests(unittest.TestCase):
         with (
             patch("gold_monitor._slot_due", return_value=(True, 123)),
             patch("gold_monitor._fetch_gold_frame", new_callable=AsyncMock, return_value=source) as fetch,
-            patch("gold_monitor.resample_candles", return_value=source),
-            patch("gold_monitor._analyse_and_notify", new_callable=AsyncMock),
+            patch("gold_monitor._analyse_and_notify", new_callable=AsyncMock) as analyse,
         ):
             import asyncio
             asyncio.run(_gold_monitor_cycle(App(), now_epoch=saturday))
         self.assertEqual(fetch.await_args.args[0], "BTC/USD")
+        self.assertEqual(analyse.await_count, 1)
+        self.assertEqual(analyse.await_args.args[1], "5m")
 
     def test_weekday_cycle_uses_gold_for_special_monitoring(self):
         class App:
@@ -262,35 +263,18 @@ class GoldApiScheduleTests(unittest.TestCase):
         with (
             patch("gold_monitor._slot_due", return_value=(True, 123)),
             patch("gold_monitor._fetch_gold_frame", new_callable=AsyncMock, return_value=source) as fetch,
-            patch("gold_monitor.resample_candles", return_value=source),
-            patch("gold_monitor._analyse_and_notify", new_callable=AsyncMock),
+            patch("gold_monitor._analyse_and_notify", new_callable=AsyncMock) as analyse,
         ):
             import asyncio
             asyncio.run(_gold_monitor_cycle(App(), now_epoch=tuesday))
         self.assertEqual(fetch.await_args.args[0], "XAU/USD")
+        self.assertEqual(analyse.await_count, 1)
+        self.assertEqual(analyse.await_args.args[1], "5m")
 
-    def test_single_m5_feed_can_be_resampled_for_m15(self):
-        from market_data import resample_candles
+    def test_special_monitor_does_not_schedule_or_analyse_fifteen_minute_candles(self):
+        self.assertNotIn("15m", GOLD_TIMEFRAMES)
+        self.assertEqual(set(GOLD_FETCH_SCHEDULE), {"m5_source"})
 
-        now = pd.Timestamp.now(tz="UTC").floor("5min")
-        index = pd.date_range(
-            end=now - pd.Timedelta(minutes=5),
-            periods=GOLD_SOURCE_OUTPUTSIZE,
-            freq="5min",
-        )
-        close = np.linspace(2000.0, 2010.0, len(index))
-        source = pd.DataFrame(
-            {
-                "open": close - 0.05,
-                "high": close + 0.20,
-                "low": close - 0.20,
-                "close": close,
-            },
-            index=index,
-        )
-        fifteen_minute = resample_candles(source, "15m")
-        self.assertGreaterEqual(len(source), 80)
-        self.assertGreaterEqual(len(fifteen_minute), 80)
 
 
 if __name__ == "__main__":
