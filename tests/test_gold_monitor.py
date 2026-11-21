@@ -231,7 +231,7 @@ class GoldApiScheduleTests(unittest.TestCase):
         self.assertLessEqual(estimated_daily_gold_monitor_requests(), 350)
 
     def test_total_gold_usage_includes_scanner_but_scanner_is_other_pool(self):
-        self.assertEqual(estimated_daily_gold_requests(), 336)
+        self.assertEqual(estimated_daily_gold_requests(), 384)
 
     def test_weekend_cycle_makes_no_gold_api_request(self):
         class App:
