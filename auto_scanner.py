@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import state
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from config import MARKETS, TELEGRAM_CHANNEL_ID, AUTO_SCAN_MIN_SCORE
+from config import MARKETS, FOREX_MARKETS, TELEGRAM_CHANNEL_ID, AUTO_SCAN_MIN_SCORE
 from market_scope import get_session_markets
 from market_data import fetch_candles, MarketDataError
 from strategy import analyze, format_signal
