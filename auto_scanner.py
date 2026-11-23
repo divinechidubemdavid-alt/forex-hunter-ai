@@ -187,7 +187,7 @@ async def _send_early_alert(app, symbol, result):
             f"Score: {score:.0f}/100\n"
             f"Reference entry: {entry:g}\n"
             f"Structural stop area: {stop_loss:g}\n"
-            f"Invalidation: {result.get('invalidation_rule') or 'A completed candle invalidates the setup beyond the structural stop area.'}\n\n"
+            "Invalidation: invalidate if a completed 15m candle closes beyond the structural stop area.\\n\\n"
             "Do not treat this as a confirmed trade. Wait for the full "
             f"{AUTO_SCAN_MIN_SCORE}/100 qualification and all normal confirmations."
         )
