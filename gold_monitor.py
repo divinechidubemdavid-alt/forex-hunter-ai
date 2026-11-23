@@ -15,7 +15,7 @@ import pandas as pd
 import state
 from config import MARKETS, TELEGRAM_CHANNEL_ID, GOLD_BUDGET_SHARE
 from market_data import fetch_candles, MarketDataError
-from strategy import calculate_indicators, analyze
+from strategy import calculate_indicators
 from chart import create_market_chart
 
 logger = logging.getLogger(__name__)
@@ -408,51 +408,8 @@ async def _send_gold_update(app, result, initial=False):
 
 
 
-async def _send_early_alert(app, symbol, result):
-    """Send a provisional WATCH/candidate alert without creating a trade."""
-    stage = result.get("signal_stage")
-    direction = result.get("direction") or result.get("status") or "UNCONFIRMED"
-    title = "EARLY ENTRY CANDIDATE — PROVISIONAL" if stage == "EARLY_ENTRY_CANDIDATE" else "DEVELOPING TREND — WATCH"
-    candles = result.get("candles")
-    latest_price = result.get("entry")
-    if latest_price is None and candles is not None and len(candles):
-        latest_price = candles.iloc[-1]["close"]
-    lines = [f"🟡 {title}", "", f"Market: {symbol}", f"Timeframe: {result.get('timeframe', '5m')}", f"Direction being watched: {direction}", f"Setup score: {float(result.get('score', 0) or 0):.0f}/100"]
-    if latest_price is not None:
-        lines.append(f"Price: {float(latest_price):g}")
-    if result.get("stop_loss") is not None:
-        lines.append(f"Provisional structural invalidation: {float(result['stop_loss']):g}")
-    lines.extend(["", str(result.get("reason") or "Early momentum is developing; wait for confirmation."), "", "⚠️ PROVISIONAL ONLY — not a confirmed BUY/SELL signal. Do not treat this as an entry instruction. The confirmed scanner still requires at least 80/100 and completed-candle confirmation."])
-    caption = "\n".join(lines)
-    chart = None
-    try:
-        chart = create_market_chart(candles, symbol, result.get("timeframe", "5m"), strategy="EARLY TREND DISCOVERY", signal_stage=stage)
-    except Exception:
-        logger.exception("Could not create %s early-discovery chart.", symbol)
-    candle_time = str(result.get("candle_time") or "unknown")
-    delivery_key = f"early-discovery:{symbol}:{stage}:{direction}:{candle_time}"
-    for user_id in state.get_users():
-        target_key = f"{delivery_key}:user:{user_id}"
-        if state.get_last_alert(target_key):
-            continue
-        try:
-            if not state.user_monitoring_enabled(user_id):
-                continue
-            settings = state.get_user_settings(user_id) or {}
-            notifications = settings.get("notifications") or {}
-            if notifications.get("gold_updates", True) is False:
-                continue
-            if chart is not None:
-                chart.seek(0)
-                await app.bot.send_photo(chat_id=int(user_id), photo=chart, caption=caption)
-            else:
-                await app.bot.send_message(chat_id=int(user_id), text=caption)
-            state.set_last_alert(target_key, "sent")
-        except Exception:
-            logger.exception("Could not send provisional alert to user %s.", user_id)
-
-
 async def _analyse_and_notify(app, timeframe, frame, symbol=GOLD):
+    """Publish market-condition changes only; trade alerts belong to auto_scanner."""
     key = f"special_monitor:{symbol}:condition:{timeframe}"
     previous = state.get_scanner_state(key, {})
     if not isinstance(previous, dict):
@@ -475,17 +432,6 @@ async def _analyse_and_notify(app, timeframe, frame, symbol=GOLD):
     )
     if first_snapshot or (condition_changed and new_candle):
         await _send_gold_update(app, result, initial=first_snapshot)
-
-    # Publish provisional discovery stages only; confirmed BUY/SELL alerts
-    # remain the responsibility of the main scanner.
-    if timeframe == "5m" and new_candle:
-        try:
-            early = analyze(frame, timeframe, trading_style="SCALPING")
-            if early.get("signal_stage") in {"EARLY_WATCH", "EARLY_ENTRY_CANDIDATE"}:
-                await _send_early_alert(app, symbol, early)
-        except Exception:
-            logger.exception("Could not evaluate provisional %s early alert.", symbol)
-
 
 async def _fetch_gold_frame(symbol, timeframe, interval, outputsize=1500):
     # The shared eight-second cooldown applies across every Twelve Data

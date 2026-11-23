@@ -7,6 +7,7 @@ on:
       - "repair/**"
       - "feature/**"
       - "upgrade/**"
+      - "fix/**"
   pull_request:
     branches:
       - main
