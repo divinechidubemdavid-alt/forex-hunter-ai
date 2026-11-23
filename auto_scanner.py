@@ -137,7 +137,7 @@ def _signal_key(symbol, result):
     )
 
 
-async def _early_signal_key(symbol, result):
+def _early_signal_key(symbol, result):
     """Deduplicate provisional alerts by market, stage, direction and closed candle."""
     return (
         f"adaptive-early:{symbol}:{SCAN_TIMEFRAME}:"
@@ -172,22 +172,22 @@ async def _send_early_alert(app, symbol, result):
     candle_time = str(result.get("candle_time") or "unknown")
     if stage == "EARLY_WATCH":
         caption = (
-            f"🟡 DEVELOPING TREND — WATCH ONLY\\n"
-            f"{symbol} | {SCAN_TIMEFRAME.upper()}\\n"
-            f"Direction under observation: {direction}\\n"
-            f"Score: {score:.0f}/100\\n\\n"
-            f"{result.get('reason') or 'Waiting for stronger confirmation.'}\\n\\n"
+            f"🟡 DEVELOPING TREND — WATCH ONLY\n"
+            f"{symbol} | {SCAN_TIMEFRAME.upper()}\n"
+            f"Direction under observation: {direction}\n"
+            f"Score: {score:.0f}/100\n\n"
+            f"{result.get('reason') or 'Waiting for stronger confirmation.'}\n\n"
             "This is not a BUY/SELL signal. Wait for confirmation."
         )
     else:
         caption = (
-            f"🟠 PROVISIONAL EARLY ENTRY — NOT CONFIRMED\\n"
-            f"{symbol} | {SCAN_TIMEFRAME.upper()}\\n"
-            f"Possible direction: {direction}\\n"
-            f"Score: {score:.0f}/100\\n"
-            f"Reference entry: {entry:g}\\n"
-            f"Structural stop area: {stop_loss:g}\\n"
-            f"Invalidation: {result.get('invalidation_rule') or 'A completed candle invalidates the setup beyond the structural stop area.'}\\n\\n"
+            f"🟠 PROVISIONAL EARLY ENTRY — NOT CONFIRMED\n"
+            f"{symbol} | {SCAN_TIMEFRAME.upper()}\n"
+            f"Possible direction: {direction}\n"
+            f"Score: {score:.0f}/100\n"
+            f"Reference entry: {entry:g}\n"
+            f"Structural stop area: {stop_loss:g}\n"
+            f"Invalidation: {result.get('invalidation_rule') or 'A completed candle invalidates the setup beyond the structural stop area.'}\n\n"
             "Do not treat this as a confirmed trade. Wait for the full "
             f"{AUTO_SCAN_MIN_SCORE}/100 qualification and all normal confirmations."
         )
