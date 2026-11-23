@@ -137,7 +137,123 @@ def _signal_key(symbol, result):
     )
 
 
-async def _send_signal(app, symbol, result):
+async def _early_signal_key(symbol, result):
+    """Deduplicate provisional alerts by market, stage, direction and closed candle."""
+    return (
+        f"adaptive-early:{symbol}:{SCAN_TIMEFRAME}:"
+        f"{result.get('signal_stage', 'unknown')}:"
+        f"{result.get('direction', 'unknown')}:"
+        f"{result.get('candle_time', 'unknown')}:"
+        f"{AUTOMATIC_TRADING_STYLE}"
+    )
+
+
+async def _send_early_alert(app, symbol, result):
+    """Send a watch/provisional alert without creating a trade or performance record."""
+    stage = result.get("signal_stage")
+    direction = str(result.get("direction", "")).upper()
+    score = float(result.get("score", 0) or 0)
+
+    if direction not in ("BUY", "SELL"):
+        return 0
+    if stage not in ("EARLY_WATCH", "EARLY_ENTRY_CANDIDATE"):
+        return 0
+    if stage == "EARLY_ENTRY_CANDIDATE":
+        try:
+            entry = float(result.get("entry"))
+            stop_loss = float(result.get("stop_loss"))
+        except (TypeError, ValueError):
+            return 0
+        if score < 70 or entry <= 0 or stop_loss <= 0 or entry == stop_loss:
+            return 0
+    else:
+        entry = stop_loss = None
+
+    candle_time = str(result.get("candle_time") or "unknown")
+    if stage == "EARLY_WATCH":
+        caption = (
+            f"🟡 DEVELOPING TREND — WATCH ONLY\\n"
+            f"{symbol} | {SCAN_TIMEFRAME.upper()}\\n"
+            f"Direction under observation: {direction}\\n"
+            f"Score: {score:.0f}/100\\n\\n"
+            f"{result.get('reason') or 'Waiting for stronger confirmation.'}\\n\\n"
+            "This is not a BUY/SELL signal. Wait for confirmation."
+        )
+    else:
+        caption = (
+            f"🟠 PROVISIONAL EARLY ENTRY — NOT CONFIRMED\\n"
+            f"{symbol} | {SCAN_TIMEFRAME.upper()}\\n"
+            f"Possible direction: {direction}\\n"
+            f"Score: {score:.0f}/100\\n"
+            f"Reference entry: {entry:g}\\n"
+            f"Structural stop area: {stop_loss:g}\\n"
+            f"Invalidation: {result.get('invalidation_rule') or 'A completed candle invalidates the setup beyond the structural stop area.'}\\n\\n"
+            "Do not treat this as a confirmed trade. Wait for the full "
+            f"{AUTO_SCAN_MIN_SCORE}/100 qualification and all normal confirmations."
+        )
+
+    alert_key = _early_signal_key(symbol, result)
+    chart = None
+    try:
+        chart = create_market_chart(
+            result.get("candles"), symbol, SCAN_TIMEFRAME,
+            entry=entry,
+            stop_loss=stop_loss,
+            take_profits=[],
+            strategy=result.get("strategy"),
+            signal_stage=stage,
+            trading_style=AUTOMATIC_TRADING_STYLE,
+        )
+    except Exception:
+        logger.exception("Could not create early-stage chart for %s.", symbol)
+
+    try:
+        user_ids = state.get_users()
+    except Exception:
+        logger.exception("Could not load registered users for early alert.")
+        user_ids = []
+
+    delivered = 0
+    for user_id in user_ids:
+        delivery_key = f"{alert_key}:user:{user_id}"
+        if state.get_last_alert(delivery_key):
+            continue
+        try:
+            if chart is not None:
+                chart.seek(0)
+                await app.bot.send_photo(
+                    chat_id=int(user_id), photo=chart, caption=caption,
+                )
+            else:
+                await app.bot.send_message(chat_id=int(user_id), text=caption)
+            state.set_last_alert(delivery_key, "sent")
+            delivered += 1
+        except Exception:
+            logger.exception("Could not send early alert to user %s.", user_id)
+
+    if TELEGRAM_CHANNEL_ID:
+        delivery_key = f"{alert_key}:channel:{TELEGRAM_CHANNEL_ID}"
+        if not state.get_last_alert(delivery_key):
+            try:
+                if chart is not None:
+                    chart.seek(0)
+                    await app.bot.send_photo(
+                        chat_id=int(TELEGRAM_CHANNEL_ID), photo=chart,
+                        caption=caption,
+                    )
+                else:
+                    await app.bot.send_message(
+                        chat_id=int(TELEGRAM_CHANNEL_ID), text=caption,
+                    )
+                state.set_last_alert(delivery_key, "sent")
+                delivered += 1
+            except Exception:
+                logger.exception("Could not publish early alert to channel.")
+
+    return delivered
+
+
+def _send_signal(app, symbol, result):
     """Publish an opportunity without silently adding it to user tracking."""
     result["trading_style"] = AUTOMATIC_TRADING_STYLE
     result["style_label"] = style_label(AUTOMATIC_TRADING_STYLE)
@@ -298,30 +414,58 @@ async def _scan_market(app, symbol):
 
         result["symbol"] = symbol
 
-        if result.get("status") not in ("BUY", "SELL"):
-            logger.info(
-                "No qualifying setup for %s. No notification sent.",
-                symbol,
-            )
+        status = str(result.get("status", "WAIT")).upper()
+        stage = str(result.get("signal_stage", "WAIT")).upper()
+
+        # Confirmed trade alerts retain the existing strict qualification path.
+        if status in ("BUY", "SELL"):
+            score = float(result.get("score", 0) or 0)
+            if score < AUTO_SCAN_MIN_SCORE:
+                logger.info(
+                    "Signal for %s did not reach the confirmed alert threshold.",
+                    symbol,
+                )
+                return
+
+            key = _signal_key(symbol, result)
+            delivered = await _send_signal(app, symbol, result)
+            if not delivered:
+                logger.info(
+                    "No new delivery confirmed for %s; failed destinations remain eligible for retry.",
+                    key,
+                )
             return
 
-        score = float(result.get("score", 0))
+        # Early stages are informational only. They never enter the normal
+        # opportunity feed, tracking flow, or system performance history.
+        if status == "WAIT" and stage in (
+            "EARLY_WATCH", "EARLY_ENTRY_CANDIDATE"
+        ):
+            direction = str(result.get("direction", "")).upper()
+            score = float(result.get("score", 0) or 0)
+            if direction not in ("BUY", "SELL"):
+                logger.info("Early stage for %s has no valid direction; skipped.", symbol)
+                return
+            if stage == "EARLY_ENTRY_CANDIDATE" and (
+                score < 70 or result.get("entry") is None
+                or result.get("stop_loss") is None
+            ):
+                logger.info("Incomplete provisional candidate for %s; skipped.", symbol)
+                return
 
-        if score < AUTO_SCAN_MIN_SCORE:
-            logger.info(
-                "Signal for %s did not reach the alert threshold.",
-                symbol,
-            )
+            key = _early_signal_key(symbol, result)
+            delivered = await _send_early_alert(app, symbol, result)
+            if not delivered:
+                logger.info(
+                    "No new early-alert delivery confirmed for %s; failed destinations remain eligible for retry.",
+                    key,
+                )
             return
 
-        key = _signal_key(symbol, result)
-
-        delivered = await _send_signal(app, symbol, result)
-        if not delivered:
-            logger.info(
-                "No new delivery confirmed for %s; failed destinations remain eligible for retry.",
-                key,
-            )
+        logger.info(
+            "No qualifying setup for %s (status=%s, stage=%s).",
+            symbol, status, stage,
+        )
 
     except MarketDataError as exc:
         logger.warning(
