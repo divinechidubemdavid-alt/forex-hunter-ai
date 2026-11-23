@@ -253,7 +253,7 @@ async def _send_early_alert(app, symbol, result):
     return delivered
 
 
-def _send_signal(app, symbol, result):
+async def _send_signal(app, symbol, result):
     """Publish an opportunity without silently adding it to user tracking."""
     result["trading_style"] = AUTOMATIC_TRADING_STYLE
     result["style_label"] = style_label(AUTOMATIC_TRADING_STYLE)
